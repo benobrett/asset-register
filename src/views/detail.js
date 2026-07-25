@@ -1,4 +1,5 @@
 import { supabase, getPhotoUrl } from '../supabase.js';
+import { getSession } from '../auth.js';
 import { validateAssetForm, validateRepairForm } from '../validation.js';
 import { queueAsset, queueRepair } from '../db.js';
 import { syncAll } from '../sync.js';
@@ -36,7 +37,7 @@ export async function renderDetail(container, { navigate, params }) {
       .single(),
     supabase
       .from('asset_repairs')
-      .select('id, description, reported_at, completed_at')
+      .select('id, description, reported_at, completed_at, created_by_email')
       .eq('asset_id', params.id)
       .order('reported_at', { ascending: false }),
   ]);
@@ -91,7 +92,9 @@ export async function renderDetail(container, { navigate, params }) {
     return `
       <li class="repair-item" data-id="${repair.id}">
         <p class="repair-description">${escapeHtml(repair.description)}</p>
-        <p class="asset-meta">Reported ${new Date(repair.reported_at).toLocaleString()}</p>
+        <p class="asset-meta">
+          Added by ${escapeHtml(repair.created_by_email)} · ${new Date(repair.reported_at).toLocaleString()}
+        </p>
         ${status}
         <button type="button" class="link-button edit-repair-button" data-id="${repair.id}">Edit</button>
       </li>
@@ -171,12 +174,14 @@ export async function renderDetail(container, { navigate, params }) {
       saveButton.disabled = true;
 
       try {
+        const session = await getSession();
         const repair = {
           id: crypto.randomUUID(),
           assetId: asset.id,
           description: textarea.value.trim(),
           reportedAt: new Date().toISOString(),
           completedAt: null,
+          createdByEmail: session?.user?.email ?? 'Unknown',
         };
         await queueRepair(repair);
         if (navigator.onLine) {
@@ -189,6 +194,7 @@ export async function renderDetail(container, { navigate, params }) {
             description: repair.description,
             reported_at: repair.reportedAt,
             completed_at: null,
+            created_by_email: repair.createdByEmail,
           },
           ...repairs,
         ];
@@ -239,6 +245,7 @@ export async function renderDetail(container, { navigate, params }) {
             description: textarea.value.trim(),
             reportedAt: repair.reported_at,
             completedAt: repair.completed_at,
+            createdByEmail: repair.created_by_email,
           });
           if (navigator.onLine) {
             await syncAll();
@@ -268,6 +275,7 @@ export async function renderDetail(container, { navigate, params }) {
             description: repair.description,
             reportedAt: repair.reported_at,
             completedAt,
+            createdByEmail: repair.created_by_email,
           });
           if (navigator.onLine) {
             await syncAll();

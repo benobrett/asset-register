@@ -56,6 +56,7 @@ export async function syncQueuedRepairs() {
         description: repair.description,
         reported_at: repair.reportedAt,
         completed_at: repair.completedAt,
+        created_by_email: repair.createdByEmail,
       });
       if (error) throw error;
 
