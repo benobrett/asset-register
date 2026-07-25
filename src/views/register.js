@@ -44,6 +44,20 @@ export function renderRegister(container, { navigate }) {
       </label>
       <p class="form-error" id="list-error" role="alert" hidden></p>
       <ul class="asset-list" id="asset-list"></ul>
+      <div class="asset-table-wrapper">
+        <table class="asset-table" id="asset-table">
+          <thead>
+            <tr>
+              <th>Asset ID</th>
+              <th>Name</th>
+              <th>Description</th>
+              <th>Status</th>
+              <th>Repairs</th>
+            </tr>
+          </thead>
+          <tbody id="asset-table-body"></tbody>
+        </table>
+      </div>
     </section>
   `;
 
@@ -54,24 +68,23 @@ export function renderRegister(container, { navigate }) {
   });
 
   const listEl = container.querySelector('#asset-list');
+  const tableBodyEl = container.querySelector('#asset-table-body');
   const errorEl = container.querySelector('#list-error');
   const searchInput = container.querySelector('#search');
   const sortSelect = container.querySelector('#sort-select');
 
   async function loadAssets(searchTerm, sortKey) {
     listEl.innerHTML = '<li class="asset-list-status">Loading…</li>';
+    tableBodyEl.innerHTML = '<tr><td colspan="5">Loading…</td></tr>';
     errorEl.hidden = true;
 
     const sort = SORT_OPTIONS[sortKey];
     let query = supabase
       .from('assets')
-      .select('id, asset_number, asset_name, recorded_at')
+      .select('id, asset_number, asset_name, description, recorded_at')
       .order(sort.column, { ascending: sort.ascending });
 
     if (searchTerm) {
-      // Description is no longer shown in the list, but it's still worth
-      // matching on — the issue only asked to change what's displayed,
-      // not what's searchable.
       query = query.or(`asset_name.ilike.%${searchTerm}%,description.ilike.%${searchTerm}%`);
     }
 
@@ -87,6 +100,7 @@ export function renderRegister(container, { navigate }) {
 
     if (error) {
       listEl.innerHTML = '';
+      tableBodyEl.innerHTML = '';
       errorEl.hidden = false;
       errorEl.textContent = error.message || 'Could not load assets.';
       return;
@@ -94,22 +108,47 @@ export function renderRegister(container, { navigate }) {
 
     if (!data.length) {
       listEl.innerHTML = '<li class="asset-list-status">No assets found.</li>';
+      tableBodyEl.innerHTML = '<tr><td colspan="5">No assets found.</td></tr>';
       return;
     }
 
-    const outstandingAssetIds = new Set();
-    const repairCounts = new Map();
+    const outstandingCounts = new Map();
+    const totalCounts = new Map();
     for (const repair of repairsResult.data || []) {
-      repairCounts.set(repair.asset_id, (repairCounts.get(repair.asset_id) ?? 0) + 1);
+      totalCounts.set(repair.asset_id, (totalCounts.get(repair.asset_id) ?? 0) + 1);
       if (!repair.completed_at) {
-        outstandingAssetIds.add(repair.asset_id);
+        outstandingCounts.set(repair.asset_id, (outstandingCounts.get(repair.asset_id) ?? 0) + 1);
       }
     }
 
     listEl.innerHTML = '';
+    tableBodyEl.innerHTML = '';
     for (const asset of data) {
-      const hasOutstandingRepair = outstandingAssetIds.has(asset.id);
-      const repairCount = repairCounts.get(asset.id) ?? 0;
+      const outstandingCount = outstandingCounts.get(asset.id) ?? 0;
+      const totalCount = totalCounts.get(asset.id) ?? 0;
+      const hasOutstandingRepair = outstandingCount > 0;
+
+      async function handleDelete(event, rowEl) {
+        event.stopPropagation();
+
+        const confirmed = await confirmDialog({
+          message: `Delete "${asset.asset_name}"? This will also delete its ${totalCount} repair record${totalCount === 1 ? '' : 's'}. This can't be undone.`,
+        });
+        if (!confirmed) return;
+
+        errorEl.hidden = true;
+        const { error: deleteError } = await supabase.from('assets').delete().eq('id', asset.id);
+        if (deleteError) {
+          errorEl.hidden = false;
+          errorEl.textContent = deleteError.message || 'Could not delete this asset.';
+          return;
+        }
+
+        rowEl.remove();
+        if (!listEl.children.length) {
+          listEl.innerHTML = '<li class="asset-list-status">No assets found.</li>';
+        }
+      }
 
       const item = document.createElement('li');
       item.className = 'asset-list-item';
@@ -137,28 +176,29 @@ export function renderRegister(container, { navigate }) {
       item.querySelector('.asset-list-button').addEventListener('click', () => {
         navigate(`#/asset/${asset.id}`);
       });
-      item.querySelector('.delete-asset-button').addEventListener('click', async (event) => {
-        event.stopPropagation();
+      item
+        .querySelector('.delete-asset-button')
+        .addEventListener('click', (event) => handleDelete(event, item));
+      listEl.appendChild(item);
 
-        const confirmed = await confirmDialog({
-          message: `Delete "${asset.asset_name}"? This will also delete its ${repairCount} repair record${repairCount === 1 ? '' : 's'}. This can't be undone.`,
-        });
-        if (!confirmed) return;
-
-        errorEl.hidden = true;
-        const { error: deleteError } = await supabase.from('assets').delete().eq('id', asset.id);
-        if (deleteError) {
-          errorEl.hidden = false;
-          errorEl.textContent = deleteError.message || 'Could not delete this asset.';
-          return;
-        }
-
-        item.remove();
-        if (!listEl.children.length) {
-          listEl.innerHTML = '<li class="asset-list-status">No assets found.</li>';
+      const row = document.createElement('tr');
+      row.className = `asset-table-row ${hasOutstandingRepair ? 'has-repair' : ''}`;
+      row.tabIndex = 0;
+      row.innerHTML = `
+        <td>${formatAssetId(asset.asset_number)}</td>
+        <td>${escapeHtml(asset.asset_name)}</td>
+        <td class="asset-table-description">${escapeHtml(asset.description)}</td>
+        <td>${hasOutstandingRepair ? '<span class="repair-tag">🔧 Outstanding</span>' : 'OK'}</td>
+        <td>${outstandingCount}</td>
+      `;
+      row.addEventListener('click', () => navigate(`#/asset/${asset.id}`));
+      row.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          navigate(`#/asset/${asset.id}`);
         }
       });
-      listEl.appendChild(item);
+      tableBodyEl.appendChild(row);
     }
   }
 
