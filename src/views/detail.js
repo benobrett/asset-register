@@ -2,6 +2,7 @@ import { supabase, getPhotoUrl } from '../supabase.js';
 import { validateAssetForm, validateRepairForm } from '../validation.js';
 import { queueAsset, queueRepair } from '../db.js';
 import { syncAll } from '../sync.js';
+import { formatAssetId } from '../format.js';
 
 function toDateTimeLocal(isoString) {
   const date = new Date(isoString);
@@ -30,7 +31,7 @@ export async function renderDetail(container, { navigate, params }) {
   const [assetResult, repairsResult] = await Promise.all([
     supabase
       .from('assets')
-      .select('id, asset_name, description, recorded_at, photo_path')
+      .select('id, asset_number, asset_name, description, recorded_at, photo_path')
       .eq('id', params.id)
       .single(),
     supabase
@@ -102,6 +103,8 @@ export async function renderDetail(container, { navigate, params }) {
       <article class="asset-detail">
         ${photoUrl ? `<img src="${photoUrl}" alt="Asset photo" class="asset-detail-photo" />` : ''}
         <dl>
+          <dt>Asset ID</dt>
+          <dd>${formatAssetId(asset.asset_number)}</dd>
           <dt>Asset name</dt>
           <dd>${escapeHtml(asset.asset_name)}</dd>
           <dt>Description</dt>
@@ -282,6 +285,11 @@ export async function renderDetail(container, { navigate, params }) {
   function drawEditForm() {
     body.innerHTML = `
       <form id="edit-form" novalidate>
+        <label>
+          Asset ID
+          <input type="text" value="${formatAssetId(asset.asset_number)}" disabled />
+        </label>
+
         <label>
           Asset name
           <input type="text" name="assetName" value="${escapeHtml(asset.asset_name)}" required />
