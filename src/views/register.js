@@ -3,6 +3,8 @@ import { signOut } from '../auth.js';
 import { formatAssetId } from '../format.js';
 import { confirmDialog } from '../confirmDialog.js';
 
+const SORT_STORAGE_KEY = 'assetSort';
+
 const SORT_OPTIONS = {
   newest: { column: 'recorded_at', ascending: false },
   oldest: { column: 'recorded_at', ascending: true },
@@ -76,6 +78,13 @@ export function renderRegister(container, { navigate }) {
   const errorEl = container.querySelector('#list-error');
   const searchInput = container.querySelector('#search');
   const sortSelect = container.querySelector('#sort-select');
+
+  // Persists for the browser tab/session (sessionStorage clears itself
+  // when the tab or browser closes) - not on the option order in the
+  // markup, which no longer matches "Newest first" now that "Repairs"
+  // is listed first.
+  const storedSort = sessionStorage.getItem(SORT_STORAGE_KEY);
+  sortSelect.value = storedSort && SORT_OPTIONS[storedSort] ? storedSort : 'newest';
 
   async function loadAssets(searchTerm, sortKey) {
     listEl.innerHTML = '<li class="asset-list-status">Loading…</li>';
@@ -227,6 +236,7 @@ export function renderRegister(container, { navigate }) {
   });
 
   sortSelect.addEventListener('change', () => {
+    sessionStorage.setItem(SORT_STORAGE_KEY, sortSelect.value);
     loadAssets(searchInput.value.trim(), sortSelect.value);
   });
 
