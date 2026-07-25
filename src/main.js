@@ -1,0 +1,61 @@
+import { getSession, onAuthChange } from './auth.js';
+import { renderLogin } from './views/login.js';
+import { renderHome } from './views/home.js';
+import { renderRegister } from './views/register.js';
+import { renderCapture } from './views/capture.js';
+import { renderDetail } from './views/detail.js';
+
+const app = document.getElementById('app');
+
+const routes = [
+  { pattern: /^#\/login$/, view: renderLogin, public: true },
+  { pattern: /^#\/home$/, view: renderHome },
+  { pattern: /^#\/register$/, view: renderRegister },
+  { pattern: /^#\/capture$/, view: renderCapture },
+  { pattern: /^#\/asset\/(?<id>[^/]+)$/, view: renderDetail },
+];
+
+function navigate(hash) {
+  if (window.location.hash === hash) {
+    route();
+  } else {
+    window.location.hash = hash;
+  }
+}
+
+let currentSession = null;
+
+async function route() {
+  const hash = window.location.hash || '#/home';
+
+  if (!currentSession) {
+    currentSession = await getSession();
+  }
+
+  if (!currentSession && hash !== '#/login') {
+    window.location.hash = '#/login';
+    return;
+  }
+  if (currentSession && hash === '#/login') {
+    window.location.hash = '#/home';
+    return;
+  }
+
+  for (const { pattern, view } of routes) {
+    const match = hash.match(pattern);
+    if (match) {
+      view(app, { navigate, params: match.groups || {} });
+      return;
+    }
+  }
+
+  app.innerHTML = '<p>Page not found.</p>';
+}
+
+onAuthChange((session) => {
+  currentSession = session;
+  route();
+});
+
+window.addEventListener('hashchange', route);
+route();
