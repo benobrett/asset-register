@@ -8,6 +8,9 @@ const SORT_OPTIONS = {
   oldest: { column: 'recorded_at', ascending: true },
   'name-asc': { column: 'asset_name', ascending: true },
   'name-desc': { column: 'asset_name', ascending: false },
+  // Not a pure re-order like the others — also filters out assets with
+  // no repair records at all.
+  repairs: { column: 'asset_name', ascending: true, repairsOnly: true },
 };
 
 const TRASH_ICON_SVG = `
@@ -36,6 +39,7 @@ export function renderRegister(container, { navigate }) {
       <label class="sort-label">
         Sort by
         <select id="sort-select">
+          <option value="repairs">Repairs</option>
           <option value="newest">Newest first</option>
           <option value="oldest">Oldest first</option>
           <option value="name-asc">Name (A–Z)</option>
@@ -106,12 +110,6 @@ export function renderRegister(container, { navigate }) {
       return;
     }
 
-    if (!data.length) {
-      listEl.innerHTML = '<li class="asset-list-status">No assets found.</li>';
-      tableBodyEl.innerHTML = '<tr><td colspan="5">No assets found.</td></tr>';
-      return;
-    }
-
     const outstandingCounts = new Map();
     const totalCounts = new Map();
     for (const repair of repairsResult.data || []) {
@@ -121,9 +119,23 @@ export function renderRegister(container, { navigate }) {
       }
     }
 
+    // Once every repair on an asset is marked completed it drops out —
+    // same rule as the row highlight, based on outstanding repairs only,
+    // not whether one was ever logged.
+    const displayData = sort.repairsOnly
+      ? data.filter((asset) => (outstandingCounts.get(asset.id) ?? 0) > 0)
+      : data;
+
+    if (!displayData.length) {
+      const emptyMessage = sort.repairsOnly ? 'No assets with repairs found.' : 'No assets found.';
+      listEl.innerHTML = `<li class="asset-list-status">${emptyMessage}</li>`;
+      tableBodyEl.innerHTML = `<tr><td colspan="5">${emptyMessage}</td></tr>`;
+      return;
+    }
+
     listEl.innerHTML = '';
     tableBodyEl.innerHTML = '';
-    for (const asset of data) {
+    for (const asset of displayData) {
       const outstandingCount = outstandingCounts.get(asset.id) ?? 0;
       const totalCount = totalCounts.get(asset.id) ?? 0;
       const hasOutstandingRepair = outstandingCount > 0;
@@ -146,7 +158,10 @@ export function renderRegister(container, { navigate }) {
 
         rowEl.remove();
         if (!listEl.children.length) {
-          listEl.innerHTML = '<li class="asset-list-status">No assets found.</li>';
+          const emptyMessage = sort.repairsOnly
+            ? 'No assets with repairs found.'
+            : 'No assets found.';
+          listEl.innerHTML = `<li class="asset-list-status">${emptyMessage}</li>`;
         }
       }
 
