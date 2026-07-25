@@ -8,6 +8,11 @@ export default defineConfig({
   plugins: [
     VitePWA({
       registerType: 'autoUpdate',
+      workbox: {
+        // Default only globs js/css/html — widened so the logo and the
+        // self-hosted font actually precache for offline use too.
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,webmanifest,ttf}'],
+      },
       // No icons yet — add them under public/ before this is installed
       // as a home-screen app on the Chromebook.
       manifest: {
