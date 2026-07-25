@@ -21,11 +21,13 @@ export async function syncQueuedAssets() {
 
       const { error: insertError } = await supabase.from('assets').upsert({
         id: asset.id,
+        asset_name: asset.assetName,
         description: asset.description,
         recorded_at: asset.recordedAt,
         photo_path: asset.photoPath,
         repair_needed: asset.repairNeeded,
         repair_description: asset.repairDescription,
+        repair_completed_at: asset.repairCompletedAt,
       });
       if (insertError) throw insertError;
 

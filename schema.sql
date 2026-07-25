@@ -1,5 +1,6 @@
 create table assets (
   id uuid primary key default gen_random_uuid(),
+  asset_name text not null,
   description text not null,
   recorded_at timestamptz not null default now(),   -- the user-facing "Date/time" field: pre-populated client-side, editable
   photo_path text,                                   -- object path in Supabase Storage

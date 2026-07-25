@@ -1,7 +1,17 @@
 // Pure validation logic for the new-asset form — kept separate from
 // capture.js so it can be unit tested without a DOM or Supabase client.
-export function validateAssetForm({ description, recordedAt, repairNeeded, repairDescription }) {
+export function validateAssetForm({
+  assetName,
+  description,
+  recordedAt,
+  repairNeeded,
+  repairDescription,
+}) {
   const errors = {};
+
+  if (!assetName || !assetName.trim()) {
+    errors.assetName = 'Asset name is required.';
+  }
 
   if (!description || !description.trim()) {
     errors.description = 'Description is required.';

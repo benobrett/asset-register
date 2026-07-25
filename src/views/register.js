@@ -25,11 +25,11 @@ export function renderRegister(container, { navigate }) {
 
     let query = supabase
       .from('assets')
-      .select('id, description, recorded_at, photo_path, repair_needed')
+      .select('id, asset_name, description, recorded_at, photo_path, repair_needed')
       .order('recorded_at', { ascending: false });
 
     if (searchTerm) {
-      query = query.ilike('description', `%${searchTerm}%`);
+      query = query.or(`asset_name.ilike.%${searchTerm}%,description.ilike.%${searchTerm}%`);
     }
 
     const { data, error } = await query;
@@ -54,6 +54,7 @@ export function renderRegister(container, { navigate }) {
         <button type="button" class="asset-list-button" data-id="${asset.id}">
           <span class="asset-photo-thumb" data-thumb="${asset.id}"></span>
           <span class="asset-list-text">
+            <span class="asset-name">${escapeHtml(asset.asset_name)}</span>
             <span class="asset-description">${escapeHtml(asset.description)}</span>
             <span class="asset-meta">
               ${new Date(asset.recorded_at).toLocaleString()}
