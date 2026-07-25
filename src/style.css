@@ -156,6 +156,10 @@ button:disabled {
   gap: 0.15rem;
 }
 
+.asset-name {
+  font-weight: 600;
+}
+
 .asset-meta {
   font-size: 0.8rem;
   color: #6b6b66;
@@ -178,6 +182,12 @@ button:disabled {
 
 .asset-detail dd {
   margin: 0;
+}
+
+.edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 @media (prefers-color-scheme: dark) {

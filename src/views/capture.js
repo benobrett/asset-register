@@ -19,6 +19,12 @@ export function renderCapture(container, { navigate }) {
       </header>
       <form id="capture-form" novalidate>
         <label>
+          Asset name
+          <input type="text" name="assetName" required />
+        </label>
+        <p class="field-error" data-error-for="assetName" hidden></p>
+
+        <label>
           Photo
           <input type="file" name="photo" accept="image/*" capture="environment" />
         </label>
@@ -85,12 +91,14 @@ export function renderCapture(container, { navigate }) {
     const submitError = container.querySelector('#submit-error');
     submitError.hidden = true;
 
+    const assetName = form.assetName.value;
     const description = form.description.value;
     const recordedAt = form.recordedAt.value;
     const repairNeeded = repairCheckbox.checked;
     const repairDescription = form.repairDescription.value;
 
     const { valid, errors } = validateAssetForm({
+      assetName,
       description,
       recordedAt,
       repairNeeded,
@@ -112,12 +120,14 @@ export function renderCapture(container, { navigate }) {
       // the 'online' listener in main.js retries it later.
       await queueAsset({
         id: crypto.randomUUID(),
+        assetName: assetName.trim(),
         description: description.trim(),
         recordedAt: new Date(recordedAt).toISOString(),
         photoPath,
         photo: file ?? null,
         repairNeeded,
         repairDescription: repairNeeded ? repairDescription.trim() : null,
+        repairCompletedAt: null,
       });
 
       if (navigator.onLine) {

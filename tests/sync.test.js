@@ -36,12 +36,14 @@ describe('syncQueuedAssets', () => {
     getUnsyncedAssetsMock.mockResolvedValue([
       {
         id: '1',
+        assetName: 'Office chair 12',
         description: 'Office chair',
         recordedAt: '2026-07-25T10:00:00.000Z',
         photoPath: 'user-1/1.jpg',
         photo: new Blob(['x']),
         repairNeeded: false,
         repairDescription: null,
+        repairCompletedAt: null,
       },
     ]);
 
@@ -52,11 +54,13 @@ describe('syncQueuedAssets', () => {
     });
     expect(tableUpsert).toHaveBeenCalledWith({
       id: '1',
+      asset_name: 'Office chair 12',
       description: 'Office chair',
       recorded_at: '2026-07-25T10:00:00.000Z',
       photo_path: 'user-1/1.jpg',
       repair_needed: false,
       repair_description: null,
+      repair_completed_at: null,
     });
     expect(markAssetSyncedMock).toHaveBeenCalledWith('1');
     expect(result).toEqual({ succeeded: ['1'], failed: [] });
@@ -66,12 +70,14 @@ describe('syncQueuedAssets', () => {
     getUnsyncedAssetsMock.mockResolvedValue([
       {
         id: '2',
+        assetName: 'Standing desk 4',
         description: 'Standing desk',
         recordedAt: '2026-07-25T10:00:00.000Z',
         photoPath: null,
         photo: null,
         repairNeeded: false,
         repairDescription: null,
+        repairCompletedAt: null,
       },
     ]);
 
@@ -85,12 +91,14 @@ describe('syncQueuedAssets', () => {
     getUnsyncedAssetsMock.mockResolvedValue([
       {
         id: '3',
+        assetName: 'Desk lamp 7',
         description: 'Desk lamp',
         recordedAt: '2026-07-25T10:00:00.000Z',
         photoPath: null,
         photo: null,
         repairNeeded: false,
         repairDescription: null,
+        repairCompletedAt: null,
       },
     ]);
     tableUpsert.mockResolvedValue({ error: { message: 'network error' } });
