@@ -71,6 +71,24 @@ create table assets (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- `default now()` on updated_at only fires on insert, not on later edits —
+-- without this trigger it would silently keep showing the creation time
+-- forever, even after a real edit via the "existing asset" flow.
+create or replace function set_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+create trigger assets_set_updated_at
+  before update on assets
+  for each row
+  execute function set_updated_at();
 ```
 Photos live in a Storage bucket (e.g. `asset-photos`); `photo_path` stores the object path, and the app derives a URL at render time.
 
@@ -102,6 +120,7 @@ Requires a one-time setup step outside the codebase: enabling the Google provide
 4. If offline, the record sits in IndexedDB. A listener on `window.addEventListener('online', ...)`, plus a check on app load, retries any unsynced records.
 5. IndexedDB stores Blobs directly, so the photo itself — not just its metadata — survives offline until it syncs.
 6. `vite-plugin-pwa` caches the app shell (HTML/CSS/JS) so the app loads at all with no connection.
+7. **Known limitation:** if the same asset is edited offline in one session while also edited online elsewhere before the first sync completes, whichever sync lands last wins silently — there's no conflict detection. Not a practical risk with a single user; worth addressing (e.g. comparing `updated_at` before overwriting, or flagging the conflict for manual review) if this becomes genuinely multi-user.
 
 ## Camera capture
 Using `<input type="file" accept="image/*" capture="environment">` rather than a hand-built `getUserMedia()` live preview:
@@ -122,7 +141,7 @@ Using `<input type="file" accept="image/*" capture="environment">` rather than a
 
 ## Git workflow & CI/CD
 - `main` is protected: no direct pushes, PRs only.
-- Branch protection requires **at least one approving review** and a passing CI check before merge.
+- Branch protection requires a passing CI check before merge. (A required approving review is worth adding once there's more than one contributor — with a single person, GitHub won't let you approve your own PR, so that specific rule would block every merge until then.)
 - One branch per change: `feature/short-description` or `fix/short-description`.
 - `.github/workflows/ci.yml` runs on every PR:
 ```yaml
