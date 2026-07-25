@@ -91,6 +91,7 @@ export async function renderDetail(container, { navigate, params }) {
   // is never reset by (or resets) any of that state.
   let infoRepairId = null;
   let outsideInfoClickHandler = null;
+  let repairSortKey = 'newest';
 
   let photoUrl = null;
   if (asset.photo_path) {
@@ -184,6 +185,22 @@ export async function renderDetail(container, { navigate, params }) {
     `;
   }
 
+  // `repairs` is already newest-first by reported_at (the initial query's
+  // order, preserved since new repairs are unshifted to the front and
+  // later mutations only change fields, never reorder) — so filtering
+  // here is enough, no separate sort step needed.
+  function getFilteredRepairs() {
+    if (repairSortKey === 'todo') return repairs.filter((r) => !r.completed_at);
+    if (repairSortKey === 'complete') return repairs.filter((r) => r.completed_at);
+    return repairs;
+  }
+
+  function getRepairsEmptyMessage() {
+    if (repairSortKey === 'todo') return 'No repairs to do.';
+    if (repairSortKey === 'complete') return 'No completed repairs found.';
+    return 'No repairs logged.';
+  }
+
   function renderInfoPanel() {
     const repair = repairs.find((r) => r.id === infoRepairId);
     if (!repair) return '';
@@ -245,14 +262,21 @@ export async function renderDetail(container, { navigate, params }) {
       </article>
 
       <section class="repairs" id="repairs-section">
-        <h2>Repairs</h2>
+        <div class="view-header repairs-header">
+          <h2>Repairs</h2>
+          <button type="button" id="new-repair-button" ${addingRepair ? 'hidden' : ''}>New repair</button>
+        </div>
         ${repairsLoadError ? `<p class="form-error" role="alert">${escapeHtml(repairsLoadError)}</p>` : ''}
+        <label class="sort-label">
+          Sort by
+          <select id="repair-sort-select">
+            <option value="newest" ${repairSortKey === 'newest' ? 'selected' : ''}>Newest</option>
+            <option value="todo" ${repairSortKey === 'todo' ? 'selected' : ''}>To do</option>
+            <option value="complete" ${repairSortKey === 'complete' ? 'selected' : ''}>Repair Complete</option>
+          </select>
+        </label>
         <div class="repairs-layout">
           <div class="repairs-main">
-            <ul class="repair-list">
-              ${repairs.length ? repairs.map(renderRepairItem).join('') : '<li class="asset-list-status">No repairs logged.</li>'}
-            </ul>
-            <button type="button" id="new-repair-button" ${addingRepair ? 'hidden' : ''}>New repair</button>
             <div id="new-repair-form" ${addingRepair ? '' : 'hidden'}>
               <label>
                 Repair description
@@ -265,6 +289,13 @@ export async function renderDetail(container, { navigate, params }) {
                 <button type="button" id="cancel-repair-button" class="link-button">Cancel</button>
               </div>
             </div>
+            <ul class="repair-list">
+              ${
+                getFilteredRepairs().length
+                  ? getFilteredRepairs().map(renderRepairItem).join('')
+                  : `<li class="asset-list-status">${getRepairsEmptyMessage()}</li>`
+              }
+            </ul>
           </div>
           ${renderInfoPanel()}
         </div>
@@ -294,6 +325,11 @@ export async function renderDetail(container, { navigate, params }) {
 
   function wireRepairSection() {
     const repairsSection = body.querySelector('#repairs-section');
+
+    repairsSection.querySelector('#repair-sort-select').addEventListener('change', (event) => {
+      repairSortKey = event.target.value;
+      drawView();
+    });
 
     for (const button of repairsSection.querySelectorAll('.repair-info-button')) {
       button.addEventListener('click', (event) => {

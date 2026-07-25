@@ -621,6 +621,14 @@ button[type='submit']:active {
   border-top: 1px solid var(--color-border);
 }
 
+.repairs-header {
+  margin-bottom: 0.75rem;
+}
+
+.repairs-header h2 {
+  margin: 0;
+}
+
 #new-repair-form {
   display: flex;
   flex-direction: column;
