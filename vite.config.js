@@ -1,7 +1,13 @@
 import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
-export default defineConfig({
+// GitHub Pages serves a project site under /<repo-name>/, not the root —
+// only applied for `vite build`, not `vite dev`, so the local dev server
+// still serves from / as normal.
+const GITHUB_PAGES_BASE = '/asset-register/';
+
+export default defineConfig(({ command }) => ({
+  base: command === 'build' ? GITHUB_PAGES_BASE : '/',
   build: {
     outDir: 'dist',
   },
@@ -18,11 +24,12 @@ export default defineConfig({
       manifest: {
         name: 'Asset Register',
         short_name: 'Assets',
-        start_url: '/',
+        start_url: GITHUB_PAGES_BASE,
+        scope: GITHUB_PAGES_BASE,
         display: 'standalone',
         background_color: '#ffffff',
         theme_color: '#ffffff',
       },
     }),
   ],
-});
+}));
