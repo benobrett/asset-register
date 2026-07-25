@@ -6,7 +6,17 @@ export function renderLogin(container, { navigate }) {
   function draw() {
     container.innerHTML = `
       <section class="view view-login">
+        <img
+          src="/brook-waimarama-sanctuary-logo.png"
+          alt="The Brook Waimārama Sanctuary, Nelson New Zealand"
+          class="login-logo"
+        />
         <h1>Asset Register</h1>
+        <p class="login-welcome">
+          Welcome to the Brook Waimārama Sanctuary Asset Register. Use this app to log new
+          assets with a photo and details, track repairs, and keep the sanctuary's equipment
+          register up to date in the field — even without a signal.
+        </p>
         <form id="auth-form" novalidate>
           <label>
             Email
