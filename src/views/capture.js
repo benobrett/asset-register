@@ -95,6 +95,9 @@ export function renderCapture(container, { navigate }) {
     return `
       <li class="repair-item" data-local-id="${repair.localId}">
         <p class="repair-description">${escapeHtml(repair.description)}</p>
+        <p class="asset-meta">
+          Added by ${escapeHtml(repair.createdByEmail)} · ${new Date(repair.reportedAt).toLocaleString()}
+        </p>
         <button type="button" class="link-button edit-repair-button" data-local-id="${repair.localId}">
           Edit
         </button>
@@ -132,7 +135,7 @@ export function renderCapture(container, { navigate }) {
       drawRepairsSection();
     });
 
-    repairsSection.querySelector('#save-repair-button').addEventListener('click', () => {
+    repairsSection.querySelector('#save-repair-button').addEventListener('click', async () => {
       const textarea = repairsSection.querySelector('#new-repair-description');
       const errorEl = repairsSection.querySelector('#new-repair-error');
       const { valid } = validateRepairForm({ description: textarea.value });
@@ -142,7 +145,16 @@ export function renderCapture(container, { navigate }) {
         return;
       }
 
-      pendingRepairs.push({ localId: crypto.randomUUID(), description: textarea.value.trim() });
+      const saveButton = repairsSection.querySelector('#save-repair-button');
+      saveButton.disabled = true;
+
+      const session = await getSession();
+      pendingRepairs.push({
+        localId: crypto.randomUUID(),
+        description: textarea.value.trim(),
+        reportedAt: new Date().toISOString(),
+        createdByEmail: session?.user?.email ?? 'Unknown',
+      });
       addingNew = false;
       drawRepairsSection();
     });
@@ -238,8 +250,9 @@ export function renderCapture(container, { navigate }) {
           id: crypto.randomUUID(),
           assetId,
           description: repair.description,
-          reportedAt: recordedAtIso,
+          reportedAt: repair.reportedAt,
           completedAt: null,
+          createdByEmail: repair.createdByEmail,
         });
       }
 

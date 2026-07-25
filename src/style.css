@@ -401,6 +401,13 @@ button[type='submit']:active {
   margin-top: 0.75rem;
 }
 
+/* The `display: flex` above has higher specificity than the browser's
+   default `[hidden] { display: none }`, so it was winning and showing
+   the form even while `hidden` was set — this restores that default. */
+#new-repair-form[hidden] {
+  display: none;
+}
+
 .repair-list {
   list-style: none;
   margin: 0 0 0.85rem;

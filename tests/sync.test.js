@@ -118,6 +118,7 @@ describe('syncQueuedRepairs', () => {
         description: 'Armrest is cracked',
         reportedAt: '2026-07-25T10:00:00.000Z',
         completedAt: null,
+        createdByEmail: 'jane@example.com',
       },
     ]);
 
@@ -129,6 +130,7 @@ describe('syncQueuedRepairs', () => {
       description: 'Armrest is cracked',
       reported_at: '2026-07-25T10:00:00.000Z',
       completed_at: null,
+      created_by_email: 'jane@example.com',
     });
     expect(markRepairSyncedMock).toHaveBeenCalledWith('r1');
     expect(result).toEqual({ succeeded: ['r1'], failed: [] });
@@ -142,6 +144,7 @@ describe('syncQueuedRepairs', () => {
         description: 'Wheel is loose',
         reportedAt: '2026-07-25T10:00:00.000Z',
         completedAt: null,
+        createdByEmail: 'jane@example.com',
       },
     ]);
     tableUpsert.mockResolvedValue({ error: { message: 'network error' } });

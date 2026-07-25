@@ -56,6 +56,10 @@ create table asset_repairs (
   reported_at timestamptz not null default now(),
   completed_at timestamptz,                          -- null while outstanding; set when marked done
   created_by uuid references auth.users(id) default auth.uid(),
+  -- auth.users isn't queryable client-side via RLS, so the email is also
+  -- captured directly at save time - lets the UI show "Added by" without
+  -- an extra join/permission the client doesn't have.
+  created_by_email text not null,
   created_at timestamptz not null default now()
 );
 
