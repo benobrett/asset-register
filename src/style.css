@@ -32,6 +32,10 @@
   --color-error: #b3261e;
   --color-error-soft: rgba(179, 38, 30, 0.08);
 
+  --color-repair-highlight-bg: #ebf5ff;
+  --color-repair-highlight-border: #bfdbfe;
+  --color-repair-highlight-text: #1d4ed8;
+
   --radius-sm: 0.6rem;
   --radius-md: 0.9rem;
 
@@ -133,7 +137,9 @@ label {
 }
 
 input,
-textarea {
+textarea,
+select {
+  font: inherit;
   font-size: 1rem;
   padding: 0.65rem 0.75rem;
   border: 1px solid var(--color-border);
@@ -144,7 +150,8 @@ textarea {
 }
 
 input:hover,
-textarea:hover {
+textarea:hover,
+select:hover {
   border-color: var(--color-border-strong);
 }
 
@@ -158,11 +165,39 @@ input:disabled:hover {
   border-color: var(--color-border);
 }
 
+.register-intro {
+  color: var(--color-text-muted);
+  margin: 0 0 1rem;
+}
+
 input[type='search'] {
   width: 100%;
   margin-bottom: 1rem;
   background: var(--color-surface);
   box-shadow: var(--shadow-sm);
+}
+
+.sort-label {
+  /* A compact inline control, not another stacked form field — overrides
+     the default label's column layout/bold weight. */
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  font-weight: 400;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  /* The extra separation from the search field down to the list —
+     issue #8 asked for roughly 16px more than the search field's own
+     gap above. */
+  margin-bottom: 2rem;
+}
+
+.sort-label select {
+  width: 33%;
+  padding: 0.45rem 0.6rem;
+  font-size: 0.85rem;
 }
 
 button {
@@ -333,12 +368,28 @@ button[type='submit']:active {
   background: var(--color-surface);
 }
 
-.asset-photo-thumb {
-  width: 48px;
-  height: 48px;
-  border-radius: var(--radius-sm);
-  background: var(--color-surface-alt) center/cover no-repeat;
-  flex-shrink: 0;
+/* Repair highlight is never the only signal — the repair-tag label
+   below carries the same information for anyone who can't rely on the
+   color difference. */
+.asset-list-button.has-repair {
+  background: var(--color-repair-highlight-bg);
+  border-color: var(--color-repair-highlight-border);
+}
+
+.asset-list-button.has-repair:hover {
+  background: var(--color-repair-highlight-bg);
+  border-color: var(--color-repair-highlight-border);
+}
+
+.repair-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-repair-highlight-text);
+  white-space: nowrap;
+  margin-left: auto;
 }
 
 .asset-list-text {
@@ -463,6 +514,10 @@ button[type='submit']:active {
 
     --color-error: #ff6b60;
     --color-error-soft: rgba(255, 107, 96, 0.12);
+
+    --color-repair-highlight-bg: #16233a;
+    --color-repair-highlight-border: #2c4568;
+    --color-repair-highlight-text: #8fc1ff;
 
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 1px rgba(0, 0, 0, 0.24);
     --shadow-md: 0 8px 20px rgba(0, 0, 0, 0.36), 0 2px 6px rgba(0, 0, 0, 0.24);
