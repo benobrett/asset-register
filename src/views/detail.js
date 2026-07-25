@@ -17,6 +17,23 @@ const TRASH_ICON_SVG = `
   </svg>
 `;
 
+const INFO_ICON_SVG = `
+  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+    stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <circle cx="12" cy="12" r="10"></circle>
+    <line x1="12" y1="16" x2="12" y2="12"></line>
+    <line x1="12" y1="8" x2="12.01" y2="8"></line>
+  </svg>
+`;
+
+const CLOSE_ICON_SVG = `
+  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+    stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <line x1="18" y1="6" x2="6" y2="18"></line>
+    <line x1="6" y1="6" x2="18" y2="18"></line>
+  </svg>
+`;
+
 function toDateTimeLocal(isoString) {
   const date = new Date(isoString);
   date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
@@ -69,6 +86,11 @@ export async function renderDetail(container, { navigate, params }) {
   let editingRepairId = null;
   let addingRepair = false;
   let markingCompleteId = null;
+  // Independent of the other three — viewing a repair's Information
+  // alongside an open New/Edit/Mark-complete elsewhere is fine, so this
+  // is never reset by (or resets) any of that state.
+  let infoRepairId = null;
+  let outsideInfoClickHandler = null;
 
   let photoUrl = null;
   if (asset.photo_path) {
@@ -116,22 +138,64 @@ export async function renderDetail(container, { navigate, params }) {
       `;
     }
 
-    const status = repair.completed_at
-      ? `
-        <p class="repair-status repair-status-completed">✓ Repair completed</p>
-        <p class="asset-meta">
-          Completed by ${escapeHtml(repair.completed_by_email)} · ${new Date(repair.completed_at).toLocaleString()}
-        </p>
-        ${repair.completed_comment ? `<p class="repair-comment">${escapeHtml(repair.completed_comment)}</p>` : ''}
-      `
-      : `
-        <p class="repair-status">Outstanding</p>
-        <button type="button" class="mark-completed-button" data-id="${repair.id}">Mark as complete</button>
-      `;
+    // Description, the completion tick, and the optional comment are the
+    // repair's actual content, so they stay visible by default. Added/
+    // Edited/Completed date-time + username are audit metadata — moved
+    // behind the Information panel instead of cluttering every row.
+    const statusSlot = repair.completed_at
+      ? '<p class="repair-status repair-status-completed">✓ Repair completed</p>'
+      : '<span class="repair-status repair-status-todo">To do</span>';
+
+    const commentBlock =
+      repair.completed_at && repair.completed_comment
+        ? `<p class="repair-comment">${escapeHtml(repair.completed_comment)}</p>`
+        : '';
 
     return `
       <li class="repair-item" data-id="${repair.id}">
-        <p class="repair-description">${escapeHtml(repair.description)}</p>
+        <div class="repair-item-top">
+          <p class="repair-description">${escapeHtml(repair.description)}</p>
+          ${statusSlot}
+        </div>
+        ${commentBlock}
+        <div class="repair-item-actions">
+          <button type="button" class="link-button edit-repair-button" data-id="${repair.id}">
+            Edit
+          </button>
+          <button
+            type="button"
+            class="link-button repair-info-button"
+            data-id="${repair.id}"
+            aria-expanded="${repair.id === infoRepairId}"
+          >
+            ${INFO_ICON_SVG} Information
+          </button>
+          ${
+            !repair.completed_at
+              ? `
+            <button type="button" class="link-button mark-completed-button" data-id="${repair.id}">
+              Mark as complete
+            </button>
+          `
+              : ''
+          }
+        </div>
+      </li>
+    `;
+  }
+
+  function renderInfoPanel() {
+    const repair = repairs.find((r) => r.id === infoRepairId);
+    if (!repair) return '';
+
+    return `
+      <div class="repair-info-panel" id="repair-info-panel">
+        <div class="repair-info-header">
+          <h3>Repair history</h3>
+          <button type="button" class="repair-icon-button" id="close-info-panel" aria-label="Close">
+            ${CLOSE_ICON_SVG}
+          </button>
+        </div>
         <p class="asset-meta">
           Added by ${escapeHtml(repair.created_by_email)} · ${new Date(repair.reported_at).toLocaleString()}
         </p>
@@ -144,9 +208,16 @@ export async function renderDetail(container, { navigate, params }) {
         `
             : ''
         }
-        ${status}
-        <button type="button" class="link-button edit-repair-button" data-id="${repair.id}">Edit</button>
-      </li>
+        ${
+          repair.completed_at
+            ? `
+          <p class="asset-meta">
+            Completed by ${escapeHtml(repair.completed_by_email)} · ${new Date(repair.completed_at).toLocaleString()}
+          </p>
+        `
+            : ''
+        }
+      </div>
     `;
   }
 
@@ -176,21 +247,26 @@ export async function renderDetail(container, { navigate, params }) {
       <section class="repairs" id="repairs-section">
         <h2>Repairs</h2>
         ${repairsLoadError ? `<p class="form-error" role="alert">${escapeHtml(repairsLoadError)}</p>` : ''}
-        <ul class="repair-list">
-          ${repairs.length ? repairs.map(renderRepairItem).join('') : '<li class="asset-list-status">No repairs logged.</li>'}
-        </ul>
-        <button type="button" id="new-repair-button" ${addingRepair ? 'hidden' : ''}>New repair</button>
-        <div id="new-repair-form" ${addingRepair ? '' : 'hidden'}>
-          <label>
-            Repair description
-            <textarea id="new-repair-description" rows="2"></textarea>
-          </label>
-          <p class="field-error" id="new-repair-error" hidden></p>
-          <p class="form-error" id="repair-submit-error" role="alert" hidden></p>
-          <div class="edit-actions">
-            <button type="button" id="save-repair-button">Save repair</button>
-            <button type="button" id="cancel-repair-button" class="link-button">Cancel</button>
+        <div class="repairs-layout">
+          <div class="repairs-main">
+            <ul class="repair-list">
+              ${repairs.length ? repairs.map(renderRepairItem).join('') : '<li class="asset-list-status">No repairs logged.</li>'}
+            </ul>
+            <button type="button" id="new-repair-button" ${addingRepair ? 'hidden' : ''}>New repair</button>
+            <div id="new-repair-form" ${addingRepair ? '' : 'hidden'}>
+              <label>
+                Repair description
+                <textarea id="new-repair-description" rows="2"></textarea>
+              </label>
+              <p class="field-error" id="new-repair-error" hidden></p>
+              <p class="form-error" id="repair-submit-error" role="alert" hidden></p>
+              <div class="edit-actions">
+                <button type="button" id="save-repair-button">Save repair</button>
+                <button type="button" id="cancel-repair-button" class="link-button">Cancel</button>
+              </div>
+            </div>
           </div>
+          ${renderInfoPanel()}
         </div>
       </section>
     `;
@@ -218,6 +294,47 @@ export async function renderDetail(container, { navigate, params }) {
 
   function wireRepairSection() {
     const repairsSection = body.querySelector('#repairs-section');
+
+    for (const button of repairsSection.querySelectorAll('.repair-info-button')) {
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const id = button.dataset.id;
+        infoRepairId = infoRepairId === id ? null : id;
+        drawView();
+      });
+    }
+
+    const closeInfoButton = repairsSection.querySelector('#close-info-panel');
+    if (closeInfoButton) {
+      closeInfoButton.addEventListener('click', () => {
+        infoRepairId = null;
+        drawView();
+      });
+    }
+
+    if (outsideInfoClickHandler) {
+      document.removeEventListener('click', outsideInfoClickHandler);
+      outsideInfoClickHandler = null;
+    }
+    if (infoRepairId) {
+      outsideInfoClickHandler = (event) => {
+        // The view may have been torn down by navigating elsewhere
+        // without closing the panel first — stop listening rather than
+        // act on a detached, invisible node.
+        if (!body.isConnected) {
+          document.removeEventListener('click', outsideInfoClickHandler);
+          return;
+        }
+        const panel = body.querySelector('#repair-info-panel');
+        if (!panel || panel.contains(event.target) || event.target.closest('.repair-info-button')) {
+          return;
+        }
+        infoRepairId = null;
+        drawView();
+      };
+      document.addEventListener('click', outsideInfoClickHandler);
+    }
+
     const newRepairButton = repairsSection.querySelector('#new-repair-button');
     newRepairButton.addEventListener('click', () => {
       // Only one repair can be in "new", "edit", or "mark complete" mode
