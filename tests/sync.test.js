@@ -133,6 +133,8 @@ describe('syncQueuedRepairs', () => {
       created_by_email: 'jane@example.com',
       updated_at: null,
       updated_by_email: null,
+      completed_by_email: null,
+      completed_comment: null,
     });
     expect(markRepairSyncedMock).toHaveBeenCalledWith('r1');
     expect(result).toEqual({ succeeded: ['r1'], failed: [] });
@@ -163,6 +165,38 @@ describe('syncQueuedRepairs', () => {
       created_by_email: 'jane@example.com',
       updated_at: '2026-07-25T11:00:00.000Z',
       updated_by_email: 'sam@example.com',
+      completed_by_email: null,
+      completed_comment: null,
+    });
+  });
+
+  it('includes completed-by/comment fields when the repair has been completed', async () => {
+    getUnsyncedRepairsMock.mockResolvedValue([
+      {
+        id: 'r4',
+        assetId: '1',
+        description: 'Armrest is cracked',
+        reportedAt: '2026-07-25T10:00:00.000Z',
+        completedAt: '2026-07-25T12:00:00.000Z',
+        createdByEmail: 'jane@example.com',
+        completedByEmail: 'sam@example.com',
+        completedComment: 'Replaced the armrest bolt.',
+      },
+    ]);
+
+    await syncQueuedRepairs();
+
+    expect(tableUpsert).toHaveBeenCalledWith({
+      id: 'r4',
+      asset_id: '1',
+      description: 'Armrest is cracked',
+      reported_at: '2026-07-25T10:00:00.000Z',
+      completed_at: '2026-07-25T12:00:00.000Z',
+      created_by_email: 'jane@example.com',
+      updated_at: null,
+      updated_by_email: null,
+      completed_by_email: 'sam@example.com',
+      completed_comment: 'Replaced the armrest bolt.',
     });
   });
 
