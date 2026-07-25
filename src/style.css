@@ -673,12 +673,135 @@ button[type='submit']:active {
   color: var(--color-primary-ink);
 }
 
+/* More prominent than the plain bold status text — a colored pill,
+   same visual language as the Assets list's repair-tag badge. */
+.repair-status-todo {
+  display: inline-block;
+  padding: 0.2rem 0.7rem;
+  border-radius: 999px;
+  background: var(--color-repair-highlight-bg);
+  color: var(--color-repair-highlight-text);
+  font-weight: 700;
+  font-size: 0.8rem;
+}
+
 .repair-comment {
   margin: 0.25rem 0 0;
   padding-left: 0.6rem;
   border-left: 2px solid var(--color-border);
   color: var(--color-text-muted);
   font-style: italic;
+}
+
+.repair-item-actions {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 0.25rem;
+}
+
+.repair-info-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+/* Right-aligned within the actions row, level with Edit/Information. */
+.mark-completed-button {
+  margin-left: auto;
+}
+
+/* Ghost icon control for the Information panel's close button — small,
+   understated by default, clear on hover, and never hover-only (the
+   Assets list's hover-reveal delete icon was flagged as a touch-device
+   gap, so this stays visible at all times). */
+.repair-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  background: none;
+  border: 1px solid transparent;
+  color: var(--color-text-muted);
+  box-shadow: none;
+}
+
+.repair-icon-button:hover {
+  background: var(--color-surface-alt);
+  color: var(--color-primary-ink);
+  box-shadow: none;
+  transform: none;
+}
+
+.repair-item-top {
+  align-self: stretch;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.repairs-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.repairs-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.repair-info-panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  padding: 1rem;
+}
+
+.repair-info-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.repair-info-header h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+@media (min-width: 768px) {
+  .repairs-layout {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+
+  .repair-info-panel {
+    flex: 0 0 260px;
+  }
+}
+
+@media (max-width: 767px) {
+  /* No room for a side-by-side column on a phone-width screen — the
+     panel becomes a bottom sheet instead. */
+  .repair-info-panel {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 90;
+    max-height: 60vh;
+    overflow-y: auto;
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+    box-shadow: var(--shadow-lift);
+  }
 }
 
 @media (prefers-color-scheme: dark) {
