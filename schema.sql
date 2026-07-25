@@ -60,7 +60,12 @@ create table asset_repairs (
   -- captured directly at save time - lets the UI show "Added by" without
   -- an extra join/permission the client doesn't have.
   created_by_email text not null,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- Null until the description is actually edited - distinct from
+  -- created_at/created_by_email, so the UI can show who added a repair
+  -- versus who last edited it, rather than one timestamp implying both.
+  updated_at timestamptz,
+  updated_by_email text
 );
 
 create index asset_repairs_asset_id_idx on asset_repairs (asset_id);

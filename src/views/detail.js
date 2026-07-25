@@ -37,7 +37,7 @@ export async function renderDetail(container, { navigate, params }) {
       .single(),
     supabase
       .from('asset_repairs')
-      .select('id, description, reported_at, completed_at, created_by_email')
+      .select('id, description, reported_at, completed_at, created_by_email, updated_at, updated_by_email')
       .eq('asset_id', params.id)
       .order('reported_at', { ascending: false }),
   ]);
@@ -51,6 +51,7 @@ export async function renderDetail(container, { navigate, params }) {
 
   let asset = assetResult.data;
   let repairs = repairsResult.data || [];
+  let repairsLoadError = repairsResult.error?.message || null;
   let editingRepairId = null;
   let addingRepair = false;
 
@@ -95,6 +96,15 @@ export async function renderDetail(container, { navigate, params }) {
         <p class="asset-meta">
           Added by ${escapeHtml(repair.created_by_email)} · ${new Date(repair.reported_at).toLocaleString()}
         </p>
+        ${
+          repair.updated_at
+            ? `
+          <p class="asset-meta">
+            Edited by ${escapeHtml(repair.updated_by_email)} · ${new Date(repair.updated_at).toLocaleString()}
+          </p>
+        `
+            : ''
+        }
         ${status}
         <button type="button" class="link-button edit-repair-button" data-id="${repair.id}">Edit</button>
       </li>
@@ -120,6 +130,7 @@ export async function renderDetail(container, { navigate, params }) {
 
       <section class="repairs" id="repairs-section">
         <h2>Repairs</h2>
+        ${repairsLoadError ? `<p class="form-error" role="alert">${escapeHtml(repairsLoadError)}</p>` : ''}
         <ul class="repair-list">
           ${repairs.length ? repairs.map(renderRepairItem).join('') : '<li class="asset-list-status">No repairs logged.</li>'}
         </ul>
@@ -147,6 +158,8 @@ export async function renderDetail(container, { navigate, params }) {
     const repairsSection = body.querySelector('#repairs-section');
     const newRepairButton = repairsSection.querySelector('#new-repair-button');
     newRepairButton.addEventListener('click', () => {
+      // Only one repair can be in "new" or "edit" mode at a time.
+      editingRepairId = null;
       addingRepair = true;
       drawView();
     });
@@ -210,6 +223,8 @@ export async function renderDetail(container, { navigate, params }) {
 
     for (const button of repairsSection.querySelectorAll('.edit-repair-button')) {
       button.addEventListener('click', () => {
+        // Only one repair can be in "new" or "edit" mode at a time.
+        addingRepair = false;
         editingRepairId = button.dataset.id;
         drawView();
       });
@@ -239,6 +254,10 @@ export async function renderDetail(container, { navigate, params }) {
         button.disabled = true;
 
         try {
+          const session = await getSession();
+          const updatedAt = new Date().toISOString();
+          const updatedByEmail = session?.user?.email ?? 'Unknown';
+
           await queueRepair({
             id: repair.id,
             assetId: asset.id,
@@ -246,12 +265,16 @@ export async function renderDetail(container, { navigate, params }) {
             reportedAt: repair.reported_at,
             completedAt: repair.completed_at,
             createdByEmail: repair.created_by_email,
+            updatedAt,
+            updatedByEmail,
           });
           if (navigator.onLine) {
             await syncAll();
           }
 
           repair.description = textarea.value.trim();
+          repair.updated_at = updatedAt;
+          repair.updated_by_email = updatedByEmail;
           editingRepairId = null;
           drawView();
         } catch {
@@ -276,6 +299,8 @@ export async function renderDetail(container, { navigate, params }) {
             reportedAt: repair.reported_at,
             completedAt,
             createdByEmail: repair.created_by_email,
+            updatedAt: repair.updated_at,
+            updatedByEmail: repair.updated_by_email,
           });
           if (navigator.onLine) {
             await syncAll();
