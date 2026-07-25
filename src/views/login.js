@@ -59,7 +59,7 @@ export function renderLogin(container, { navigate }) {
       try {
         if (mode === 'login') {
           await signIn(email, password);
-          navigate('#/home');
+          navigate('#/register');
         } else {
           await signUp(email, password);
           errorEl.hidden = false;

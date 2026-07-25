@@ -20,7 +20,7 @@ export function renderCapture(container, { navigate }) {
   container.innerHTML = `
     <section class="view view-capture">
       <header class="view-header">
-        <button type="button" class="link-button" id="back">&larr; Home</button>
+        <button type="button" class="link-button" id="back">&larr; Assets</button>
         <h1>New asset</h1>
       </header>
       <form id="capture-form" novalidate>
@@ -56,7 +56,7 @@ export function renderCapture(container, { navigate }) {
     </section>
   `;
 
-  container.querySelector('#back').addEventListener('click', () => navigate('#/home'));
+  container.querySelector('#back').addEventListener('click', () => navigate('#/register'));
 
   const form = container.querySelector('#capture-form');
   const photoInput = form.photo;

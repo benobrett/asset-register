@@ -1,4 +1,5 @@
 import { supabase } from '../supabase.js';
+import { signOut } from '../auth.js';
 import { formatAssetId } from '../format.js';
 import { confirmDialog } from '../confirmDialog.js';
 
@@ -24,9 +25,12 @@ export function renderRegister(container, { navigate }) {
   container.innerHTML = `
     <section class="view view-register">
       <header class="view-header">
-        <button type="button" class="link-button" id="back">&larr; Home</button>
         <h1>Assets</h1>
+        <button type="button" class="link-button" id="logout">Log out</button>
       </header>
+      <div class="register-actions">
+        <button type="button" id="add-asset-button">Add New Asset</button>
+      </div>
       <p class="register-intro">Below is a list of all the assets for the Brook Waimārama Sanctuary.</p>
       <input type="search" id="search" placeholder="Search assets…" />
       <label class="sort-label">
@@ -43,7 +47,11 @@ export function renderRegister(container, { navigate }) {
     </section>
   `;
 
-  container.querySelector('#back').addEventListener('click', () => navigate('#/home'));
+  container.querySelector('#add-asset-button').addEventListener('click', () => navigate('#/capture'));
+  container.querySelector('#logout').addEventListener('click', async () => {
+    await signOut();
+    navigate('#/login');
+  });
 
   const listEl = container.querySelector('#asset-list');
   const errorEl = container.querySelector('#list-error');
