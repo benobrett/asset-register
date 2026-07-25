@@ -600,6 +600,14 @@ button[type='submit']:active {
   color: var(--color-primary-ink);
 }
 
+.repair-comment {
+  margin: 0.25rem 0 0;
+  padding-left: 0.6rem;
+  border-left: 2px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;

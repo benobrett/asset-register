@@ -59,6 +59,8 @@ export async function syncQueuedRepairs() {
         created_by_email: repair.createdByEmail,
         updated_at: repair.updatedAt ?? null,
         updated_by_email: repair.updatedByEmail ?? null,
+        completed_by_email: repair.completedByEmail ?? null,
+        completed_comment: repair.completedComment ?? null,
       });
       if (error) throw error;
 

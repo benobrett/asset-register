@@ -49,7 +49,9 @@ export async function renderDetail(container, { navigate, params }) {
       .single(),
     supabase
       .from('asset_repairs')
-      .select('id, description, reported_at, completed_at, created_by_email, updated_at, updated_by_email')
+      .select(
+        'id, description, reported_at, completed_at, created_by_email, updated_at, updated_by_email, completed_by_email, completed_comment'
+      )
       .eq('asset_id', params.id)
       .order('reported_at', { ascending: false }),
   ]);
@@ -66,6 +68,7 @@ export async function renderDetail(container, { navigate, params }) {
   let repairsLoadError = repairsResult.error?.message || null;
   let editingRepairId = null;
   let addingRepair = false;
+  let markingCompleteId = null;
 
   let photoUrl = null;
   if (asset.photo_path) {
@@ -95,11 +98,35 @@ export async function renderDetail(container, { navigate, params }) {
       `;
     }
 
+    if (repair.id === markingCompleteId) {
+      return `
+        <li class="repair-item" data-id="${repair.id}">
+          <p class="repair-description">${escapeHtml(repair.description)}</p>
+          <label>
+            Comments (optional)
+            <textarea class="complete-comment-textarea" rows="2"></textarea>
+          </label>
+          <div class="edit-actions">
+            <button type="button" class="save-complete-button" data-id="${repair.id}">Save</button>
+            <button type="button" class="link-button cancel-complete-button" data-id="${repair.id}">
+              Cancel
+            </button>
+          </div>
+        </li>
+      `;
+    }
+
     const status = repair.completed_at
-      ? `<p class="repair-status repair-status-completed">Repair completed ${new Date(repair.completed_at).toLocaleString()}</p>`
+      ? `
+        <p class="repair-status repair-status-completed">✓ Repair completed</p>
+        <p class="asset-meta">
+          Completed by ${escapeHtml(repair.completed_by_email)} · ${new Date(repair.completed_at).toLocaleString()}
+        </p>
+        ${repair.completed_comment ? `<p class="repair-comment">${escapeHtml(repair.completed_comment)}</p>` : ''}
+      `
       : `
         <p class="repair-status">Outstanding</p>
-        <button type="button" class="mark-completed-button" data-id="${repair.id}">Mark repair completed</button>
+        <button type="button" class="mark-completed-button" data-id="${repair.id}">Mark as complete</button>
       `;
 
     return `
@@ -193,8 +220,10 @@ export async function renderDetail(container, { navigate, params }) {
     const repairsSection = body.querySelector('#repairs-section');
     const newRepairButton = repairsSection.querySelector('#new-repair-button');
     newRepairButton.addEventListener('click', () => {
-      // Only one repair can be in "new" or "edit" mode at a time.
+      // Only one repair can be in "new", "edit", or "mark complete" mode
+      // at a time.
       editingRepairId = null;
+      markingCompleteId = null;
       addingRepair = true;
       drawView();
     });
@@ -258,8 +287,10 @@ export async function renderDetail(container, { navigate, params }) {
 
     for (const button of repairsSection.querySelectorAll('.edit-repair-button')) {
       button.addEventListener('click', () => {
-        // Only one repair can be in "new" or "edit" mode at a time.
+        // Only one repair can be in "new", "edit", or "mark complete"
+        // mode at a time.
         addingRepair = false;
+        markingCompleteId = null;
         editingRepairId = button.dataset.id;
         drawView();
       });
@@ -302,6 +333,8 @@ export async function renderDetail(container, { navigate, params }) {
             createdByEmail: repair.created_by_email,
             updatedAt,
             updatedByEmail,
+            completedByEmail: repair.completed_by_email,
+            completedComment: repair.completed_comment,
           });
           if (navigator.onLine) {
             await syncAll();
@@ -319,14 +352,40 @@ export async function renderDetail(container, { navigate, params }) {
     }
 
     for (const button of repairsSection.querySelectorAll('.mark-completed-button')) {
+      button.addEventListener('click', () => {
+        // Only one repair can be in "new", "edit", or "mark complete"
+        // mode at a time.
+        addingRepair = false;
+        editingRepairId = null;
+        markingCompleteId = button.dataset.id;
+        drawView();
+      });
+    }
+
+    for (const button of repairsSection.querySelectorAll('.cancel-complete-button')) {
+      button.addEventListener('click', () => {
+        markingCompleteId = null;
+        drawView();
+      });
+    }
+
+    for (const button of repairsSection.querySelectorAll('.save-complete-button')) {
       button.addEventListener('click', async () => {
         const repairId = button.dataset.id;
+        const item = repairsSection.querySelector(`.repair-item[data-id="${repairId}"]`);
+        const textarea = item.querySelector('.complete-comment-textarea');
         const repair = repairs.find((r) => r.id === repairId);
         if (!repair) return;
 
         button.disabled = true;
         try {
+          const session = await getSession();
           const completedAt = new Date().toISOString();
+          const completedByEmail = session?.user?.email ?? 'Unknown';
+          // Optional — save no comment rather than an empty string when
+          // the box was left blank.
+          const completedComment = textarea.value.trim() || null;
+
           await queueRepair({
             id: repair.id,
             assetId: asset.id,
@@ -336,12 +395,17 @@ export async function renderDetail(container, { navigate, params }) {
             createdByEmail: repair.created_by_email,
             updatedAt: repair.updated_at,
             updatedByEmail: repair.updated_by_email,
+            completedByEmail,
+            completedComment,
           });
           if (navigator.onLine) {
             await syncAll();
           }
 
           repair.completed_at = completedAt;
+          repair.completed_by_email = completedByEmail;
+          repair.completed_comment = completedComment;
+          markingCompleteId = null;
           drawView();
         } catch {
           button.disabled = false;

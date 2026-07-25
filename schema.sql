@@ -68,7 +68,12 @@ create table asset_repairs (
   -- created_at/created_by_email, so the UI can show who added a repair
   -- versus who last edited it, rather than one timestamp implying both.
   updated_at timestamptz,
-  updated_by_email text
+  updated_by_email text,
+  -- Same pattern as updated_at/updated_by_email: null until the repair
+  -- is actually marked complete. completed_comment is optional — left
+  -- null (not an empty string) when nothing was entered.
+  completed_by_email text,
+  completed_comment text
 );
 
 create index asset_repairs_asset_id_idx on asset_repairs (asset_id);
