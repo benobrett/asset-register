@@ -172,6 +172,12 @@ input:disabled:hover {
   border-color: var(--color-border);
 }
 
+.register-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 1rem;
+}
+
 .register-intro {
   color: var(--color-text-muted);
   margin: 0 0 1rem;
@@ -366,17 +372,6 @@ button[type='submit']:active {
 
 .modal-actions {
   justify-content: flex-end;
-}
-
-.home-choices {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-}
-
-.choice-button {
-  padding: 1.5rem;
-  font-size: 1.1rem;
 }
 
 .form-error {

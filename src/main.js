@@ -1,6 +1,5 @@
 import { getSession, onAuthChange } from './auth.js';
 import { renderLogin } from './views/login.js';
-import { renderHome } from './views/home.js';
 import { renderRegister } from './views/register.js';
 import { renderCapture } from './views/capture.js';
 import { renderDetail } from './views/detail.js';
@@ -10,7 +9,6 @@ const app = document.getElementById('app');
 
 const routes = [
   { pattern: /^#\/login$/, view: renderLogin, public: true },
-  { pattern: /^#\/home$/, view: renderHome },
   { pattern: /^#\/register$/, view: renderRegister },
   { pattern: /^#\/capture$/, view: renderCapture },
   { pattern: /^#\/asset\/(?<id>[^/]+)$/, view: renderDetail },
@@ -27,7 +25,7 @@ function navigate(hash) {
 let currentSession = null;
 
 async function route() {
-  const hash = window.location.hash || '#/home';
+  const hash = window.location.hash || '#/register';
 
   if (!currentSession) {
     currentSession = await getSession();
@@ -38,7 +36,13 @@ async function route() {
     return;
   }
   if (currentSession && hash === '#/login') {
-    window.location.hash = '#/home';
+    window.location.hash = '#/register';
+    return;
+  }
+  // The Home screen no longer exists — send stale bookmarks/history
+  // entries to the Assets screen rather than a "Page not found."
+  if (hash === '#/home') {
+    window.location.hash = '#/register';
     return;
   }
 
