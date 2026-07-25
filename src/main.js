@@ -4,6 +4,7 @@ import { renderHome } from './views/home.js';
 import { renderRegister } from './views/register.js';
 import { renderCapture } from './views/capture.js';
 import { renderDetail } from './views/detail.js';
+import { syncQueuedAssets, watchConnectivity } from './sync.js';
 
 const app = document.getElementById('app');
 
@@ -59,3 +60,10 @@ onAuthChange((session) => {
 
 window.addEventListener('hashchange', route);
 route();
+
+// Retry any records queued while offline: once on load, and again whenever
+// connectivity comes back.
+watchConnectivity();
+if (navigator.onLine) {
+  syncQueuedAssets();
+}
