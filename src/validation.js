@@ -1,12 +1,6 @@
-// Pure validation logic for the new-asset form — kept separate from
-// capture.js so it can be unit tested without a DOM or Supabase client.
-export function validateAssetForm({
-  assetName,
-  description,
-  recordedAt,
-  repairNeeded,
-  repairDescription,
-}) {
+// Pure validation logic for the asset and repair forms — kept separate from
+// the views so it can be unit tested without a DOM or Supabase client.
+export function validateAssetForm({ assetName, description, recordedAt }) {
   const errors = {};
 
   if (!assetName || !assetName.trim()) {
@@ -23,8 +17,14 @@ export function validateAssetForm({
     errors.recordedAt = 'Date/time is invalid.';
   }
 
-  if (repairNeeded && (!repairDescription || !repairDescription.trim())) {
-    errors.repairDescription = 'Describe the repair that is needed.';
+  return { valid: Object.keys(errors).length === 0, errors };
+}
+
+export function validateRepairForm({ description }) {
+  const errors = {};
+
+  if (!description || !description.trim()) {
+    errors.description = 'Repair description is required.';
   }
 
   return { valid: Object.keys(errors).length === 0, errors };

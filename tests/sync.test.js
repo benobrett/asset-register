@@ -1,13 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { storageUpload, tableUpsert, getUnsyncedAssetsMock, markAssetSyncedMock } = vi.hoisted(
-  () => ({
-    storageUpload: vi.fn(),
-    tableUpsert: vi.fn(),
-    getUnsyncedAssetsMock: vi.fn(),
-    markAssetSyncedMock: vi.fn(),
-  })
-);
+const {
+  storageUpload,
+  tableUpsert,
+  getUnsyncedAssetsMock,
+  markAssetSyncedMock,
+  getUnsyncedRepairsMock,
+  markRepairSyncedMock,
+} = vi.hoisted(() => ({
+  storageUpload: vi.fn(),
+  tableUpsert: vi.fn(),
+  getUnsyncedAssetsMock: vi.fn(),
+  markAssetSyncedMock: vi.fn(),
+  getUnsyncedRepairsMock: vi.fn(),
+  markRepairSyncedMock: vi.fn(),
+}));
 
 vi.mock('../src/supabase.js', () => ({
   supabase: {
@@ -20,15 +27,19 @@ vi.mock('../src/supabase.js', () => ({
 vi.mock('../src/db.js', () => ({
   getUnsyncedAssets: getUnsyncedAssetsMock,
   markAssetSynced: markAssetSyncedMock,
+  getUnsyncedRepairs: getUnsyncedRepairsMock,
+  markRepairSynced: markRepairSyncedMock,
 }));
 
-const { syncQueuedAssets } = await import('../src/sync.js');
+const { syncQueuedAssets, syncQueuedRepairs, syncAll } = await import('../src/sync.js');
 
 beforeEach(() => {
   storageUpload.mockReset().mockResolvedValue({ error: null });
   tableUpsert.mockReset().mockResolvedValue({ error: null });
-  getUnsyncedAssetsMock.mockReset();
+  getUnsyncedAssetsMock.mockReset().mockResolvedValue([]);
   markAssetSyncedMock.mockReset().mockResolvedValue(undefined);
+  getUnsyncedRepairsMock.mockReset().mockResolvedValue([]);
+  markRepairSyncedMock.mockReset().mockResolvedValue(undefined);
 });
 
 describe('syncQueuedAssets', () => {
@@ -41,9 +52,6 @@ describe('syncQueuedAssets', () => {
         recordedAt: '2026-07-25T10:00:00.000Z',
         photoPath: 'user-1/1.jpg',
         photo: new Blob(['x']),
-        repairNeeded: false,
-        repairDescription: null,
-        repairCompletedAt: null,
       },
     ]);
 
@@ -58,9 +66,6 @@ describe('syncQueuedAssets', () => {
       description: 'Office chair',
       recorded_at: '2026-07-25T10:00:00.000Z',
       photo_path: 'user-1/1.jpg',
-      repair_needed: false,
-      repair_description: null,
-      repair_completed_at: null,
     });
     expect(markAssetSyncedMock).toHaveBeenCalledWith('1');
     expect(result).toEqual({ succeeded: ['1'], failed: [] });
@@ -75,9 +80,6 @@ describe('syncQueuedAssets', () => {
         recordedAt: '2026-07-25T10:00:00.000Z',
         photoPath: null,
         photo: null,
-        repairNeeded: false,
-        repairDescription: null,
-        repairCompletedAt: null,
       },
     ]);
 
@@ -96,9 +98,6 @@ describe('syncQueuedAssets', () => {
         recordedAt: '2026-07-25T10:00:00.000Z',
         photoPath: null,
         photo: null,
-        repairNeeded: false,
-        repairDescription: null,
-        repairCompletedAt: null,
       },
     ]);
     tableUpsert.mockResolvedValue({ error: { message: 'network error' } });
@@ -107,5 +106,67 @@ describe('syncQueuedAssets', () => {
 
     expect(markAssetSyncedMock).not.toHaveBeenCalled();
     expect(result).toEqual({ succeeded: [], failed: [{ id: '3', error: 'network error' }] });
+  });
+});
+
+describe('syncQueuedRepairs', () => {
+  it('upserts the repair row and marks it synced', async () => {
+    getUnsyncedRepairsMock.mockResolvedValue([
+      {
+        id: 'r1',
+        assetId: '1',
+        description: 'Armrest is cracked',
+        reportedAt: '2026-07-25T10:00:00.000Z',
+        completedAt: null,
+      },
+    ]);
+
+    const result = await syncQueuedRepairs();
+
+    expect(tableUpsert).toHaveBeenCalledWith({
+      id: 'r1',
+      asset_id: '1',
+      description: 'Armrest is cracked',
+      reported_at: '2026-07-25T10:00:00.000Z',
+      completed_at: null,
+    });
+    expect(markRepairSyncedMock).toHaveBeenCalledWith('r1');
+    expect(result).toEqual({ succeeded: ['r1'], failed: [] });
+  });
+
+  it('leaves a repair queued and reports the failure when the upsert fails', async () => {
+    getUnsyncedRepairsMock.mockResolvedValue([
+      {
+        id: 'r2',
+        assetId: '1',
+        description: 'Wheel is loose',
+        reportedAt: '2026-07-25T10:00:00.000Z',
+        completedAt: null,
+      },
+    ]);
+    tableUpsert.mockResolvedValue({ error: { message: 'network error' } });
+
+    const result = await syncQueuedRepairs();
+
+    expect(markRepairSyncedMock).not.toHaveBeenCalled();
+    expect(result).toEqual({ succeeded: [], failed: [{ id: 'r2', error: 'network error' }] });
+  });
+});
+
+describe('syncAll', () => {
+  it('syncs assets before repairs', async () => {
+    const order = [];
+    getUnsyncedAssetsMock.mockImplementation(async () => {
+      order.push('assets');
+      return [];
+    });
+    getUnsyncedRepairsMock.mockImplementation(async () => {
+      order.push('repairs');
+      return [];
+    });
+
+    await syncAll();
+
+    expect(order).toEqual(['assets', 'repairs']);
   });
 });

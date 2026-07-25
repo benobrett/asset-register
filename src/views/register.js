@@ -25,7 +25,7 @@ export function renderRegister(container, { navigate }) {
 
     let query = supabase
       .from('assets')
-      .select('id, asset_name, description, recorded_at, photo_path, repair_needed')
+      .select('id, asset_name, description, recorded_at, photo_path')
       .order('recorded_at', { ascending: false });
 
     if (searchTerm) {
@@ -56,10 +56,7 @@ export function renderRegister(container, { navigate }) {
           <span class="asset-list-text">
             <span class="asset-name">${escapeHtml(asset.asset_name)}</span>
             <span class="asset-description">${escapeHtml(asset.description)}</span>
-            <span class="asset-meta">
-              ${new Date(asset.recorded_at).toLocaleString()}
-              ${asset.repair_needed ? '· Repair needed' : ''}
-            </span>
+            <span class="asset-meta">${new Date(asset.recorded_at).toLocaleString()}</span>
           </span>
         </button>
       `;

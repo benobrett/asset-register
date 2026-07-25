@@ -1,14 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { validateAssetForm } from '../src/validation.js';
+import { validateAssetForm, validateRepairForm } from '../src/validation.js';
 
 describe('validateAssetForm', () => {
-  it('passes with an asset name, description, date/time, and no repair', () => {
+  it('passes with an asset name, description, and date/time', () => {
     const result = validateAssetForm({
       assetName: 'Office chair 12',
       description: 'Office chair, blue',
       recordedAt: '2026-07-25T10:00',
-      repairNeeded: false,
-      repairDescription: '',
     });
     expect(result.valid).toBe(true);
     expect(result.errors).toEqual({});
@@ -19,8 +17,6 @@ describe('validateAssetForm', () => {
       assetName: '   ',
       description: 'Office chair, blue',
       recordedAt: '2026-07-25T10:00',
-      repairNeeded: false,
-      repairDescription: '',
     });
     expect(result.valid).toBe(false);
     expect(result.errors.assetName).toBeDefined();
@@ -31,8 +27,6 @@ describe('validateAssetForm', () => {
       assetName: 'Office chair 12',
       description: '   ',
       recordedAt: '2026-07-25T10:00',
-      repairNeeded: false,
-      repairDescription: '',
     });
     expect(result.valid).toBe(false);
     expect(result.errors.description).toBeDefined();
@@ -43,33 +37,22 @@ describe('validateAssetForm', () => {
       assetName: 'Office chair 12',
       description: 'Office chair',
       recordedAt: '',
-      repairNeeded: false,
-      repairDescription: '',
     });
     expect(result.valid).toBe(false);
     expect(result.errors.recordedAt).toBeDefined();
   });
+});
 
-  it('requires a repair description when repair is needed', () => {
-    const result = validateAssetForm({
-      assetName: 'Office chair 12',
-      description: 'Office chair',
-      recordedAt: '2026-07-25T10:00',
-      repairNeeded: true,
-      repairDescription: '',
-    });
-    expect(result.valid).toBe(false);
-    expect(result.errors.repairDescription).toBeDefined();
+describe('validateRepairForm', () => {
+  it('passes with a repair description', () => {
+    const result = validateRepairForm({ description: 'Armrest is cracked' });
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual({});
   });
 
-  it('passes when repair is needed and a repair description is given', () => {
-    const result = validateAssetForm({
-      assetName: 'Office chair 12',
-      description: 'Office chair',
-      recordedAt: '2026-07-25T10:00',
-      repairNeeded: true,
-      repairDescription: 'Armrest is cracked',
-    });
-    expect(result.valid).toBe(true);
+  it('requires a repair description', () => {
+    const result = validateRepairForm({ description: '   ' });
+    expect(result.valid).toBe(false);
+    expect(result.errors.description).toBeDefined();
   });
 });
