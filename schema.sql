@@ -1,5 +1,11 @@
 create table assets (
   id uuid primary key default gen_random_uuid(),
+  -- User-facing identifier ("Item-01", "Item-02", ...) formatted client-side
+  -- from this number. `generated always as identity` is sequence-backed, so
+  -- it's assigned atomically at insert time, based on the highest number
+  -- ever issued rather than how many rows currently exist - deleting an
+  -- asset never frees up its number for reuse.
+  asset_number bigint generated always as identity,
   asset_name text not null,
   description text not null,
   recorded_at timestamptz not null default now(),   -- the user-facing "Date/time" field: pre-populated client-side, editable
