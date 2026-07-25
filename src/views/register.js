@@ -60,7 +60,9 @@ export function renderRegister(container, { navigate }) {
       // A plain query rather than embedding assets->asset_repairs via
       // PostgREST's relationship syntax — that relies on its schema
       // cache recognizing the foreign key, which proved unreliable.
-      supabase.from('asset_repairs').select('asset_id'),
+      // Only outstanding repairs count towards the highlight — once
+      // every repair on an asset is marked completed, it should clear.
+      supabase.from('asset_repairs').select('asset_id').is('completed_at', null),
     ]);
 
     if (error) {
@@ -75,25 +77,27 @@ export function renderRegister(container, { navigate }) {
       return;
     }
 
-    const assetIdsWithRepairs = new Set((repairsResult.data || []).map((r) => r.asset_id));
+    const assetIdsWithOutstandingRepairs = new Set(
+      (repairsResult.data || []).map((r) => r.asset_id)
+    );
 
     listEl.innerHTML = '';
     for (const asset of data) {
-      const hasRepairs = assetIdsWithRepairs.has(asset.id);
+      const hasOutstandingRepair = assetIdsWithOutstandingRepairs.has(asset.id);
 
       const item = document.createElement('li');
       item.className = 'asset-list-item';
       item.innerHTML = `
         <button
           type="button"
-          class="asset-list-button ${hasRepairs ? 'has-repair' : ''}"
+          class="asset-list-button ${hasOutstandingRepair ? 'has-repair' : ''}"
           data-id="${asset.id}"
         >
           <span class="asset-list-text">
             <span class="asset-name">${escapeHtml(asset.asset_name)}</span>
             <span class="asset-meta">${formatAssetId(asset.asset_number)}</span>
           </span>
-          ${hasRepairs ? '<span class="repair-tag">🔧 Repair logged</span>' : ''}
+          ${hasOutstandingRepair ? '<span class="repair-tag">🔧 Repair logged</span>' : ''}
         </button>
       `;
       item.querySelector('.asset-list-button').addEventListener('click', () => {

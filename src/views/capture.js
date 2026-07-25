@@ -126,6 +126,8 @@ export function renderCapture(container, { navigate }) {
     `;
 
     repairsSection.querySelector('#new-repair-button').addEventListener('click', () => {
+      // Only one repair can be in "new" or "edit" mode at a time.
+      editingLocalId = null;
       addingNew = true;
       drawRepairsSection();
     });
@@ -161,6 +163,8 @@ export function renderCapture(container, { navigate }) {
 
     for (const button of repairsSection.querySelectorAll('.edit-repair-button')) {
       button.addEventListener('click', () => {
+        // Only one repair can be in "new" or "edit" mode at a time.
+        addingNew = false;
         editingLocalId = button.dataset.localId;
         drawRepairsSection();
       });

@@ -131,9 +131,39 @@ describe('syncQueuedRepairs', () => {
       reported_at: '2026-07-25T10:00:00.000Z',
       completed_at: null,
       created_by_email: 'jane@example.com',
+      updated_at: null,
+      updated_by_email: null,
     });
     expect(markRepairSyncedMock).toHaveBeenCalledWith('r1');
     expect(result).toEqual({ succeeded: ['r1'], failed: [] });
+  });
+
+  it('includes edited-at/by fields when the repair has been edited', async () => {
+    getUnsyncedRepairsMock.mockResolvedValue([
+      {
+        id: 'r3',
+        assetId: '1',
+        description: 'Armrest is cracked (updated)',
+        reportedAt: '2026-07-25T10:00:00.000Z',
+        completedAt: null,
+        createdByEmail: 'jane@example.com',
+        updatedAt: '2026-07-25T11:00:00.000Z',
+        updatedByEmail: 'sam@example.com',
+      },
+    ]);
+
+    await syncQueuedRepairs();
+
+    expect(tableUpsert).toHaveBeenCalledWith({
+      id: 'r3',
+      asset_id: '1',
+      description: 'Armrest is cracked (updated)',
+      reported_at: '2026-07-25T10:00:00.000Z',
+      completed_at: null,
+      created_by_email: 'jane@example.com',
+      updated_at: '2026-07-25T11:00:00.000Z',
+      updated_by_email: 'sam@example.com',
+    });
   });
 
   it('leaves a repair queued and reports the failure when the upsert fails', async () => {
