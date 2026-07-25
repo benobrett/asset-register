@@ -4,6 +4,18 @@ import { validateAssetForm, validateRepairForm } from '../validation.js';
 import { queueAsset, queueRepair } from '../db.js';
 import { syncAll } from '../sync.js';
 import { formatAssetId } from '../format.js';
+import { confirmDialog } from '../confirmDialog.js';
+
+const TRASH_ICON_SVG = `
+  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+    stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <polyline points="3 6 5 6 21 6"></polyline>
+    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
+    <path d="M10 11v6"></path>
+    <path d="M14 11v6"></path>
+    <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path>
+  </svg>
+`;
 
 function toDateTimeLocal(isoString) {
   const date = new Date(isoString);
@@ -125,7 +137,13 @@ export async function renderDetail(container, { navigate, params }) {
           <dt>Date/time</dt>
           <dd>${new Date(asset.recorded_at).toLocaleString()}</dd>
         </dl>
-        <button type="button" id="edit-button">Edit</button>
+        <p class="form-error" id="delete-error" role="alert" hidden></p>
+        <div class="edit-actions">
+          <button type="button" id="edit-button">Edit</button>
+          <button type="button" id="delete-asset-button" class="button-danger">
+            ${TRASH_ICON_SVG} Delete asset
+          </button>
+        </div>
       </article>
 
       <section class="repairs" id="repairs-section">
@@ -151,6 +169,23 @@ export async function renderDetail(container, { navigate, params }) {
     `;
 
     body.querySelector('#edit-button').addEventListener('click', drawEditForm);
+    body.querySelector('#delete-asset-button').addEventListener('click', async () => {
+      const confirmed = await confirmDialog({
+        message: `Delete "${asset.asset_name}"? This will also delete its ${repairs.length} repair record${repairs.length === 1 ? '' : 's'}. This can't be undone.`,
+      });
+      if (!confirmed) return;
+
+      const errorEl = body.querySelector('#delete-error');
+      errorEl.hidden = true;
+      const { error: deleteError } = await supabase.from('assets').delete().eq('id', asset.id);
+      if (deleteError) {
+        errorEl.hidden = false;
+        errorEl.textContent = deleteError.message || 'Could not delete this asset.';
+        return;
+      }
+
+      navigate('#/register');
+    });
     wireRepairSection();
   }
 

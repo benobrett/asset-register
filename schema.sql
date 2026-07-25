@@ -51,7 +51,10 @@ create index asset_comments_asset_id_idx on asset_comments (asset_id);
 -- the same way it does for assets, with no reconciliation step once it syncs.
 create table asset_repairs (
   id uuid primary key default gen_random_uuid(),
-  asset_id uuid references assets(id) not null,
+  -- on delete cascade: deleting an asset deletes its repair history with
+  -- it, atomically at the DB level rather than as two separate client
+  -- calls with a partial-failure window between them.
+  asset_id uuid references assets(id) on delete cascade not null,
   description text not null,
   reported_at timestamptz not null default now(),
   completed_at timestamptz,                          -- null while outstanding; set when marked done
