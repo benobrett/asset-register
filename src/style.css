@@ -119,11 +119,17 @@ h2 {
   margin-bottom: 1.25rem;
 }
 
-/* Forms read as a card sitting above the page, not flush against it. */
+/* Forms read as a card sitting above the page, not flush against it.
+   Capped at the app's original mobile width even inside the wider
+   tablet layout (see the min-width: 768px query below) — a data-entry
+   form doesn't get more usable by stretching across a tablet screen,
+   only the Assets table does. */
 form {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  max-width: 480px;
+  margin: 0 auto;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
@@ -481,6 +487,78 @@ button[type='submit']:active {
 .asset-list-button.has-repair:hover {
   background: var(--color-repair-highlight-bg);
   border-color: var(--color-repair-highlight-border);
+}
+
+/* Table view (tablet width and up — see the media query below). Hidden
+   by default; overflow-x: auto is a fallback in case a viewport in that
+   range still isn't quite wide enough for every column. */
+.asset-table-wrapper {
+  display: none;
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+
+.asset-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--color-surface);
+}
+
+.asset-table th,
+.asset-table td {
+  text-align: left;
+  padding: 0.65rem 0.85rem;
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.asset-table th {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  background: var(--color-surface-alt);
+}
+
+.asset-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.asset-table-row {
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.asset-table-row:hover,
+.asset-table-row:focus-visible {
+  background: var(--color-surface-alt);
+}
+
+.asset-table-row.has-repair,
+.asset-table-row.has-repair:hover {
+  background: var(--color-repair-highlight-bg);
+}
+
+.asset-table-description {
+  max-width: 260px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (min-width: 768px) {
+  #app {
+    max-width: 900px;
+  }
+
+  .asset-list {
+    display: none;
+  }
+
+  .asset-table-wrapper {
+    display: block;
+  }
 }
 
 .repair-tag {
