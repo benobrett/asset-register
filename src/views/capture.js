@@ -1,7 +1,8 @@
-import { supabase, PHOTO_BUCKET } from '../supabase.js';
 import { getSession } from '../auth.js';
 import { validateAssetForm } from '../validation.js';
 import { watchPhotoPreview, buildPhotoPath } from '../camera.js';
+import { queueAsset } from '../db.js';
+import { syncQueuedAssets } from '../sync.js';
 
 function nowForDateTimeLocal() {
   const now = new Date();
@@ -104,24 +105,24 @@ export function renderCapture(container, { navigate }) {
     try {
       const session = await getSession();
       const file = photoInput.files[0];
-      let photoPath = null;
+      const photoPath = file ? buildPhotoPath(session.user.id, file) : null;
 
-      if (file) {
-        photoPath = buildPhotoPath(session.user.id, file);
-        const { error: uploadError } = await supabase.storage
-          .from(PHOTO_BUCKET)
-          .upload(photoPath, file);
-        if (uploadError) throw uploadError;
-      }
-
-      const { error: insertError } = await supabase.from('assets').insert({
+      // Write to the offline queue first, then try to sync immediately —
+      // if the network drops mid-sync the record just stays queued and
+      // the 'online' listener in main.js retries it later.
+      await queueAsset({
+        id: crypto.randomUUID(),
         description: description.trim(),
-        recorded_at: new Date(recordedAt).toISOString(),
-        photo_path: photoPath,
-        repair_needed: repairNeeded,
-        repair_description: repairNeeded ? repairDescription.trim() : null,
+        recordedAt: new Date(recordedAt).toISOString(),
+        photoPath,
+        photo: file ?? null,
+        repairNeeded,
+        repairDescription: repairNeeded ? repairDescription.trim() : null,
       });
-      if (insertError) throw insertError;
+
+      if (navigator.onLine) {
+        await syncQueuedAssets();
+      }
 
       navigate('#/register');
     } catch (err) {
