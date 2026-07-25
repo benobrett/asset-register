@@ -4,9 +4,6 @@ create table assets (
   description text not null,
   recorded_at timestamptz not null default now(),   -- the user-facing "Date/time" field: pre-populated client-side, editable
   photo_path text,                                   -- object path in Supabase Storage
-  repair_needed boolean not null default false,
-  repair_description text,                           -- only meaningful when repair_needed = true
-  repair_completed_at timestamptz,                    -- null while outstanding; set when marked done
   created_by uuid references auth.users(id) default auth.uid(),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -14,7 +11,7 @@ create table assets (
 
 -- `default now()` on updated_at only fires on insert, not on later edits —
 -- without this trigger it would silently keep showing the creation time
--- forever, even after a real edit or a repair being marked complete.
+-- forever, even after a real edit.
 create or replace function set_updated_at()
 returns trigger
 language plpgsql
@@ -42,6 +39,22 @@ create table asset_comments (
 
 create index asset_comments_asset_id_idx on asset_comments (asset_id);
 
+-- Repairs are a log, not a single flag: an asset can have several repair
+-- records over its life, each independently editable and markable as
+-- completed. uuid (not identity) so the client can generate the id offline
+-- the same way it does for assets, with no reconciliation step once it syncs.
+create table asset_repairs (
+  id uuid primary key default gen_random_uuid(),
+  asset_id uuid references assets(id) not null,
+  description text not null,
+  reported_at timestamptz not null default now(),
+  completed_at timestamptz,                          -- null while outstanding; set when marked done
+  created_by uuid references auth.users(id) default auth.uid(),
+  created_at timestamptz not null default now()
+);
+
+create index asset_repairs_asset_id_idx on asset_repairs (asset_id);
+
 alter table assets enable row level security;
 
 create policy "Logged-in users can manage all assets"
@@ -53,5 +66,12 @@ alter table asset_comments enable row level security;
 
 create policy "Logged-in users can manage all comments"
   on asset_comments for all
+  using (auth.uid() is not null)
+  with check (auth.uid() is not null);
+
+alter table asset_repairs enable row level security;
+
+create policy "Logged-in users can manage all repairs"
+  on asset_repairs for all
   using (auth.uid() is not null)
   with check (auth.uid() is not null);

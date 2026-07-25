@@ -1,7 +1,7 @@
 import { supabase, getPhotoUrl } from '../supabase.js';
-import { validateAssetForm } from '../validation.js';
-import { queueAsset } from '../db.js';
-import { syncQueuedAssets } from '../sync.js';
+import { validateAssetForm, validateRepairForm } from '../validation.js';
+import { queueAsset, queueRepair } from '../db.js';
+import { syncAll } from '../sync.js';
 
 function toDateTimeLocal(isoString) {
   const date = new Date(isoString);
@@ -27,22 +27,31 @@ export async function renderDetail(container, { navigate, params }) {
   `;
   container.querySelector('#back').addEventListener('click', () => navigate('#/register'));
 
-  const { data, error } = await supabase
-    .from('assets')
-    .select(
-      'id, asset_name, description, recorded_at, photo_path, repair_needed, repair_description, repair_completed_at'
-    )
-    .eq('id', params.id)
-    .single();
+  const [assetResult, repairsResult] = await Promise.all([
+    supabase
+      .from('assets')
+      .select('id, asset_name, description, recorded_at, photo_path')
+      .eq('id', params.id)
+      .single(),
+    supabase
+      .from('asset_repairs')
+      .select('id, description, reported_at, completed_at')
+      .eq('asset_id', params.id)
+      .order('reported_at', { ascending: false }),
+  ]);
 
   const body = container.querySelector('#detail-body');
 
-  if (error || !data) {
-    body.innerHTML = `<p>${escapeHtml(error?.message || 'Asset not found.')}</p>`;
+  if (assetResult.error || !assetResult.data) {
+    body.innerHTML = `<p>${escapeHtml(assetResult.error?.message || 'Asset not found.')}</p>`;
     return;
   }
 
-  let asset = data;
+  let asset = assetResult.data;
+  let repairs = repairsResult.data || [];
+  let editingRepairId = null;
+  let addingRepair = false;
+
   let photoUrl = null;
   if (asset.photo_path) {
     try {
@@ -50,6 +59,42 @@ export async function renderDetail(container, { navigate, params }) {
     } catch {
       // Photo failed to load a signed URL; render without it.
     }
+  }
+
+  function renderRepairItem(repair) {
+    if (repair.id === editingRepairId) {
+      return `
+        <li class="repair-item" data-id="${repair.id}">
+          <label>
+            Repair description
+            <textarea class="edit-repair-textarea" rows="2">${escapeHtml(repair.description)}</textarea>
+          </label>
+          <p class="field-error edit-repair-error" hidden></p>
+          <div class="edit-actions">
+            <button type="button" class="save-edit-repair-button" data-id="${repair.id}">Save repair</button>
+            <button type="button" class="link-button cancel-edit-repair-button" data-id="${repair.id}">
+              Cancel
+            </button>
+          </div>
+        </li>
+      `;
+    }
+
+    const status = repair.completed_at
+      ? `<p class="repair-status repair-status-completed">Repair completed ${new Date(repair.completed_at).toLocaleString()}</p>`
+      : `
+        <p class="repair-status">Outstanding</p>
+        <button type="button" class="mark-completed-button" data-id="${repair.id}">Mark repair completed</button>
+      `;
+
+    return `
+      <li class="repair-item" data-id="${repair.id}">
+        <p class="repair-description">${escapeHtml(repair.description)}</p>
+        <p class="asset-meta">Reported ${new Date(repair.reported_at).toLocaleString()}</p>
+        ${status}
+        <button type="button" class="link-button edit-repair-button" data-id="${repair.id}">Edit</button>
+      </li>
+    `;
   }
 
   function drawView() {
@@ -63,23 +108,175 @@ export async function renderDetail(container, { navigate, params }) {
           <dd>${escapeHtml(asset.description)}</dd>
           <dt>Date/time</dt>
           <dd>${new Date(asset.recorded_at).toLocaleString()}</dd>
-          <dt>Repair needed</dt>
-          <dd>${asset.repair_needed ? 'Yes' : 'No'}</dd>
-          ${
-            asset.repair_needed
-              ? `
-            <dt>Repair description</dt>
-            <dd>${escapeHtml(asset.repair_description)}</dd>
-            <dt>Repair completed</dt>
-            <dd>${asset.repair_completed_at ? new Date(asset.repair_completed_at).toLocaleString() : 'Outstanding'}</dd>
-          `
-              : ''
-          }
         </dl>
         <button type="button" id="edit-button">Edit</button>
       </article>
+
+      <section class="repairs" id="repairs-section">
+        <h2>Repairs</h2>
+        <ul class="repair-list">
+          ${repairs.length ? repairs.map(renderRepairItem).join('') : '<li class="asset-list-status">No repairs logged.</li>'}
+        </ul>
+        <button type="button" id="new-repair-button" ${addingRepair ? 'hidden' : ''}>New repair</button>
+        <div id="new-repair-form" ${addingRepair ? '' : 'hidden'}>
+          <label>
+            Repair description
+            <textarea id="new-repair-description" rows="2"></textarea>
+          </label>
+          <p class="field-error" id="new-repair-error" hidden></p>
+          <p class="form-error" id="repair-submit-error" role="alert" hidden></p>
+          <div class="edit-actions">
+            <button type="button" id="save-repair-button">Save repair</button>
+            <button type="button" id="cancel-repair-button" class="link-button">Cancel</button>
+          </div>
+        </div>
+      </section>
     `;
+
     body.querySelector('#edit-button').addEventListener('click', drawEditForm);
+    wireRepairSection();
+  }
+
+  function wireRepairSection() {
+    const repairsSection = body.querySelector('#repairs-section');
+    const newRepairButton = repairsSection.querySelector('#new-repair-button');
+    newRepairButton.addEventListener('click', () => {
+      addingRepair = true;
+      drawView();
+    });
+
+    repairsSection.querySelector('#cancel-repair-button').addEventListener('click', () => {
+      addingRepair = false;
+      drawView();
+    });
+
+    repairsSection.querySelector('#save-repair-button').addEventListener('click', async () => {
+      const textarea = repairsSection.querySelector('#new-repair-description');
+      const errorEl = repairsSection.querySelector('#new-repair-error');
+      const submitError = repairsSection.querySelector('#repair-submit-error');
+      errorEl.hidden = true;
+      submitError.hidden = true;
+
+      const { valid } = validateRepairForm({ description: textarea.value });
+      if (!valid) {
+        errorEl.hidden = false;
+        errorEl.textContent = 'Repair description is required.';
+        return;
+      }
+
+      const saveButton = repairsSection.querySelector('#save-repair-button');
+      saveButton.disabled = true;
+
+      try {
+        const repair = {
+          id: crypto.randomUUID(),
+          assetId: asset.id,
+          description: textarea.value.trim(),
+          reportedAt: new Date().toISOString(),
+          completedAt: null,
+        };
+        await queueRepair(repair);
+        if (navigator.onLine) {
+          await syncAll();
+        }
+
+        repairs = [
+          {
+            id: repair.id,
+            description: repair.description,
+            reported_at: repair.reportedAt,
+            completed_at: null,
+          },
+          ...repairs,
+        ];
+        addingRepair = false;
+        drawView();
+      } catch (err) {
+        submitError.hidden = false;
+        submitError.textContent = err.message || 'Could not save this repair. Try again.';
+      } finally {
+        saveButton.disabled = false;
+      }
+    });
+
+    for (const button of repairsSection.querySelectorAll('.edit-repair-button')) {
+      button.addEventListener('click', () => {
+        editingRepairId = button.dataset.id;
+        drawView();
+      });
+    }
+
+    for (const button of repairsSection.querySelectorAll('.cancel-edit-repair-button')) {
+      button.addEventListener('click', () => {
+        editingRepairId = null;
+        drawView();
+      });
+    }
+
+    for (const button of repairsSection.querySelectorAll('.save-edit-repair-button')) {
+      button.addEventListener('click', async () => {
+        const repairId = button.dataset.id;
+        const item = repairsSection.querySelector(`.repair-item[data-id="${repairId}"]`);
+        const textarea = item.querySelector('.edit-repair-textarea');
+        const errorEl = item.querySelector('.edit-repair-error');
+        const { valid } = validateRepairForm({ description: textarea.value });
+        if (!valid) {
+          errorEl.hidden = false;
+          errorEl.textContent = 'Repair description is required.';
+          return;
+        }
+
+        const repair = repairs.find((r) => r.id === repairId);
+        button.disabled = true;
+
+        try {
+          await queueRepair({
+            id: repair.id,
+            assetId: asset.id,
+            description: textarea.value.trim(),
+            reportedAt: repair.reported_at,
+            completedAt: repair.completed_at,
+          });
+          if (navigator.onLine) {
+            await syncAll();
+          }
+
+          repair.description = textarea.value.trim();
+          editingRepairId = null;
+          drawView();
+        } catch {
+          button.disabled = false;
+        }
+      });
+    }
+
+    for (const button of repairsSection.querySelectorAll('.mark-completed-button')) {
+      button.addEventListener('click', async () => {
+        const repairId = button.dataset.id;
+        const repair = repairs.find((r) => r.id === repairId);
+        if (!repair) return;
+
+        button.disabled = true;
+        try {
+          const completedAt = new Date().toISOString();
+          await queueRepair({
+            id: repair.id,
+            assetId: asset.id,
+            description: repair.description,
+            reportedAt: repair.reported_at,
+            completedAt,
+          });
+          if (navigator.onLine) {
+            await syncAll();
+          }
+
+          repair.completed_at = completedAt;
+          drawView();
+        } catch {
+          button.disabled = false;
+        }
+      });
+    }
   }
 
   function drawEditForm() {
@@ -108,22 +305,6 @@ export async function renderDetail(container, { navigate, params }) {
         </label>
         <p class="field-error" data-error-for="description" hidden></p>
 
-        <label class="checkbox-label">
-          <input type="checkbox" name="repairNeeded" ${asset.repair_needed ? 'checked' : ''} />
-          Repair needed
-        </label>
-
-        <label id="repair-description-label" ${asset.repair_needed ? '' : 'hidden'}>
-          Repair description
-          <textarea name="repairDescription" rows="2">${escapeHtml(asset.repair_description)}</textarea>
-        </label>
-        <p class="field-error" data-error-for="repairDescription" hidden></p>
-
-        <label class="checkbox-label" id="repair-completed-label" ${asset.repair_needed ? '' : 'hidden'}>
-          <input type="checkbox" name="repairCompleted" ${asset.repair_completed_at ? 'checked' : ''} />
-          Repair completed
-        </label>
-
         <p class="form-error" id="submit-error" role="alert" hidden></p>
         <div class="edit-actions">
           <button type="submit">Save</button>
@@ -133,15 +314,6 @@ export async function renderDetail(container, { navigate, params }) {
     `;
 
     const form = body.querySelector('#edit-form');
-    const repairCheckbox = form.repairNeeded;
-    const repairLabel = form.querySelector('#repair-description-label');
-    const repairCompletedLabel = form.querySelector('#repair-completed-label');
-
-    repairCheckbox.addEventListener('change', () => {
-      repairLabel.hidden = !repairCheckbox.checked;
-      repairCompletedLabel.hidden = !repairCheckbox.checked;
-    });
-
     form.querySelector('#cancel-edit').addEventListener('click', drawView);
 
     function showFieldErrors(errors) {
@@ -166,31 +338,13 @@ export async function renderDetail(container, { navigate, params }) {
       const assetName = form.assetName.value;
       const description = form.description.value;
       const recordedAt = form.recordedAt.value;
-      const repairNeeded = repairCheckbox.checked;
-      const repairDescription = form.repairDescription.value;
-      const repairCompleted = form.repairCompleted.checked;
 
-      const { valid, errors } = validateAssetForm({
-        assetName,
-        description,
-        recordedAt,
-        repairNeeded,
-        repairDescription,
-      });
+      const { valid, errors } = validateAssetForm({ assetName, description, recordedAt });
       showFieldErrors(errors);
       if (!valid) return;
 
       const submitButton = form.querySelector('button[type="submit"]');
       submitButton.disabled = true;
-
-      // Marking "repair completed" for the first time stamps the current
-      // time; re-saving while it's already checked keeps the original
-      // timestamp rather than bumping it forward.
-      const repairCompletedAt = !repairNeeded
-        ? null
-        : repairCompleted
-          ? (asset.repair_completed_at ?? new Date().toISOString())
-          : null;
 
       try {
         await queueAsset({
@@ -200,13 +354,10 @@ export async function renderDetail(container, { navigate, params }) {
           recordedAt: new Date(recordedAt).toISOString(),
           photoPath: asset.photo_path,
           photo: null,
-          repairNeeded,
-          repairDescription: repairNeeded ? repairDescription.trim() : null,
-          repairCompletedAt,
         });
 
         if (navigator.onLine) {
-          await syncQueuedAssets();
+          await syncAll();
         }
 
         asset = {
@@ -214,9 +365,6 @@ export async function renderDetail(container, { navigate, params }) {
           asset_name: assetName.trim(),
           description: description.trim(),
           recorded_at: new Date(recordedAt).toISOString(),
-          repair_needed: repairNeeded,
-          repair_description: repairNeeded ? repairDescription.trim() : null,
-          repair_completed_at: repairCompletedAt,
         };
         drawView();
       } catch (err) {

@@ -3,7 +3,12 @@
 // dropped connection mid-sync is an expected condition, not an error.
 
 import { supabase, PHOTO_BUCKET } from './supabase.js';
-import { getUnsyncedAssets, markAssetSynced } from './db.js';
+import {
+  getUnsyncedAssets,
+  getUnsyncedRepairs,
+  markAssetSynced,
+  markRepairSynced,
+} from './db.js';
 
 export async function syncQueuedAssets() {
   const pending = await getUnsyncedAssets();
@@ -25,9 +30,6 @@ export async function syncQueuedAssets() {
         description: asset.description,
         recorded_at: asset.recordedAt,
         photo_path: asset.photoPath,
-        repair_needed: asset.repairNeeded,
-        repair_description: asset.repairDescription,
-        repair_completed_at: asset.repairCompletedAt,
       });
       if (insertError) throw insertError;
 
@@ -41,8 +43,42 @@ export async function syncQueuedAssets() {
   return { succeeded, failed };
 }
 
+export async function syncQueuedRepairs() {
+  const pending = await getUnsyncedRepairs();
+  const succeeded = [];
+  const failed = [];
+
+  for (const repair of pending) {
+    try {
+      const { error } = await supabase.from('asset_repairs').upsert({
+        id: repair.id,
+        asset_id: repair.assetId,
+        description: repair.description,
+        reported_at: repair.reportedAt,
+        completed_at: repair.completedAt,
+      });
+      if (error) throw error;
+
+      await markRepairSynced(repair.id);
+      succeeded.push(repair.id);
+    } catch (err) {
+      failed.push({ id: repair.id, error: err.message || String(err) });
+    }
+  }
+
+  return { succeeded, failed };
+}
+
+// Assets must sync before repairs — asset_repairs.asset_id is a foreign key,
+// so a repair queued against an asset that hasn't synced yet would fail.
+export async function syncAll() {
+  const assets = await syncQueuedAssets();
+  const repairs = await syncQueuedRepairs();
+  return { assets, repairs };
+}
+
 export function watchConnectivity() {
   window.addEventListener('online', () => {
-    syncQueuedAssets();
+    syncAll();
   });
 }

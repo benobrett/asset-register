@@ -4,7 +4,7 @@ import { renderHome } from './views/home.js';
 import { renderRegister } from './views/register.js';
 import { renderCapture } from './views/capture.js';
 import { renderDetail } from './views/detail.js';
-import { syncQueuedAssets, watchConnectivity } from './sync.js';
+import { syncAll, watchConnectivity } from './sync.js';
 
 const app = document.getElementById('app');
 
@@ -65,5 +65,5 @@ route();
 // connectivity comes back.
 watchConnectivity();
 if (navigator.onLine) {
-  syncQueuedAssets();
+  syncAll();
 }
