@@ -1,4 +1,9 @@
 import { signIn, signUp } from '../auth.js';
+// Imported (not a public/ absolute path) so Vite resolves and base-prefixes
+// it correctly when the app is deployed under a subpath, e.g. GitHub Pages'
+// /asset-register/ — a plain "/logo.png" string is left untouched by Vite
+// and would 404 there.
+import logoUrl from '../assets/brook-waimarama-sanctuary-logo.png';
 
 export function renderLogin(container, { navigate }) {
   let mode = 'login'; // or 'signup'
@@ -7,7 +12,7 @@ export function renderLogin(container, { navigate }) {
     container.innerHTML = `
       <section class="view view-login">
         <img
-          src="/brook-waimarama-sanctuary-logo.png"
+          src="${logoUrl}"
           alt="The Brook Waimārama Sanctuary, Nelson New Zealand"
           class="login-logo"
         />
