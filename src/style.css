@@ -674,6 +674,12 @@ button[type='submit']:active {
   align-items: flex-start;
 }
 
+/* Subtle tie-back to whichever repair the open Information/Comment panel
+   belongs to — a colour cue instead of repeating its description as text. */
+.repair-item-panel-open {
+  border-color: var(--color-primary);
+}
+
 .repair-description {
   margin: 0;
 }
@@ -699,7 +705,7 @@ button[type='submit']:active {
   font-size: 0.8rem;
 }
 
-.repair-comment {
+.repair-comment-preview {
   margin: 0.25rem 0 0;
   padding-left: 0.6rem;
   border-left: 2px solid var(--color-border);
@@ -789,6 +795,40 @@ button[type='submit']:active {
 .repair-info-header h3 {
   margin: 0;
   font-size: 0.95rem;
+}
+
+.comment-thread {
+  list-style: none;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.comment-thread-item {
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.comment-thread-item:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.comment-text {
+  margin: 0 0 0.15rem;
+}
+
+/* Space out the entry field from its Save/Cancel row — the panel has no
+   other buttons, so scoping to it here doesn't touch other forms' actions. */
+.repair-info-panel .edit-actions {
+  margin-top: 0.75rem;
+}
+
+.save-comment-button {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.85rem;
 }
 
 @media (min-width: 768px) {

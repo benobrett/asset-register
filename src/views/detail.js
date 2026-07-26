@@ -1,7 +1,7 @@
 import { supabase, getPhotoUrl } from '../supabase.js';
 import { getSession } from '../auth.js';
 import { validateAssetForm, validateRepairForm } from '../validation.js';
-import { queueAsset, queueRepair } from '../db.js';
+import { queueAsset, queueRepair, queueRepairComment } from '../db.js';
 import { syncAll } from '../sync.js';
 import { formatAssetId } from '../format.js';
 import { confirmDialog } from '../confirmDialog.js';
@@ -34,6 +34,13 @@ const CLOSE_ICON_SVG = `
   </svg>
 `;
 
+const COMMENT_ICON_SVG = `
+  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor"
+    stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path>
+  </svg>
+`;
+
 function toDateTimeLocal(isoString) {
   const date = new Date(isoString);
   date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
@@ -44,6 +51,15 @@ function escapeHtml(value) {
   const div = document.createElement('div');
   div.textContent = value ?? '';
   return div.innerHTML;
+}
+
+// Comments show date only, no time — e.g. "26 July 26".
+function formatCommentDate(isoString) {
+  const date = new Date(isoString);
+  const day = date.getDate();
+  const month = date.toLocaleString('en-NZ', { month: 'long' });
+  const year = String(date.getFullYear()).slice(-2);
+  return `${day} ${month} ${year}`;
 }
 
 export async function renderDetail(container, { navigate, params }) {
@@ -67,7 +83,7 @@ export async function renderDetail(container, { navigate, params }) {
     supabase
       .from('asset_repairs')
       .select(
-        'id, description, reported_at, completed_at, created_by_email, updated_at, updated_by_email, completed_by_email, completed_comment'
+        'id, description, reported_at, completed_at, created_by_email, updated_at, updated_by_email, completed_by_email'
       )
       .eq('asset_id', params.id)
       .order('reported_at', { ascending: false }),
@@ -83,13 +99,39 @@ export async function renderDetail(container, { navigate, params }) {
   let asset = assetResult.data;
   let repairs = repairsResult.data || [];
   let repairsLoadError = repairsResult.error?.message || null;
+
+  // Keyed by repair id, each value an array of { comment, created_by_email,
+  // created_at } oldest-first — the panel shows the whole array, the inline
+  // preview shows just its last entry.
+  const commentsByRepairId = new Map();
+  if (repairs.length) {
+    const { data: comments, error: commentsError } = await supabase
+      .from('repair_comments')
+      .select('id, repair_id, comment, created_by_email, created_at')
+      .in(
+        'repair_id',
+        repairs.map((r) => r.id)
+      )
+      .order('created_at', { ascending: true });
+    if (!commentsError) {
+      for (const comment of comments || []) {
+        const list = commentsByRepairId.get(comment.repair_id) || [];
+        list.push(comment);
+        commentsByRepairId.set(comment.repair_id, list);
+      }
+    }
+  }
+
   let editingRepairId = null;
   let addingRepair = false;
   let markingCompleteId = null;
-  // Independent of the other three — viewing a repair's Information
-  // alongside an open New/Edit/Mark-complete elsewhere is fine, so this
-  // is never reset by (or resets) any of that state.
-  let infoRepairId = null;
+  // Shared right-hand slot for Information and Comment — only one repair's
+  // panel shows at a time, in either mode. Comment participates in the
+  // "one editing action at a time" group with addingRepair/editingRepairId/
+  // markingCompleteId (it saves new data); Information is exempt from that
+  // group since it's view-only, but still shares this slot with Comment.
+  let panelRepairId = null;
+  let panelMode = null; // 'info' | 'comment'
   let outsideInfoClickHandler = null;
   let repairSortKey = 'newest';
 
@@ -147,13 +189,21 @@ export async function renderDetail(container, { navigate, params }) {
       ? '<p class="repair-status repair-status-completed">✓ Repair completed</p>'
       : '<span class="repair-status repair-status-todo">To do</span>';
 
-    const commentBlock =
-      repair.completed_at && repair.completed_comment
-        ? `<p class="repair-comment">${escapeHtml(repair.completed_comment)}</p>`
-        : '';
+    const repairComments = commentsByRepairId.get(repair.id) || [];
+    const latestComment = repairComments[repairComments.length - 1];
+    const commentBlock = latestComment
+      ? `
+      <p class="repair-comment-preview">
+        ${escapeHtml(latestComment.comment)}
+        <span class="asset-meta">— ${escapeHtml(latestComment.created_by_email)} · ${formatCommentDate(latestComment.created_at)}</span>
+      </p>
+    `
+      : '';
+
+    const panelOpenForThis = panelMode && repair.id === panelRepairId;
 
     return `
-      <li class="repair-item" data-id="${repair.id}">
+      <li class="repair-item ${panelOpenForThis ? 'repair-item-panel-open' : ''}" data-id="${repair.id}">
         <div class="repair-item-top">
           <p class="repair-description">${escapeHtml(repair.description)}</p>
           ${statusSlot}
@@ -167,9 +217,17 @@ export async function renderDetail(container, { navigate, params }) {
             type="button"
             class="link-button repair-info-button"
             data-id="${repair.id}"
-            aria-expanded="${repair.id === infoRepairId}"
+            aria-expanded="${panelMode === 'info' && repair.id === panelRepairId}"
           >
             ${INFO_ICON_SVG} Information
+          </button>
+          <button
+            type="button"
+            class="link-button repair-comment-button"
+            data-id="${repair.id}"
+            aria-expanded="${panelMode === 'comment' && repair.id === panelRepairId}"
+          >
+            ${COMMENT_ICON_SVG} Comment
           </button>
           ${
             !repair.completed_at
@@ -201,39 +259,87 @@ export async function renderDetail(container, { navigate, params }) {
     return 'No repairs logged.';
   }
 
-  function renderInfoPanel() {
-    const repair = repairs.find((r) => r.id === infoRepairId);
+  function renderInfoPanelBody(repair) {
+    return `
+      <p class="asset-meta">
+        Added by ${escapeHtml(repair.created_by_email)} · ${new Date(repair.reported_at).toLocaleString()}
+      </p>
+      ${
+        repair.updated_at
+          ? `
+        <p class="asset-meta">
+          Edited by ${escapeHtml(repair.updated_by_email)} · ${new Date(repair.updated_at).toLocaleString()}
+        </p>
+      `
+          : ''
+      }
+      ${
+        repair.completed_at
+          ? `
+        <p class="asset-meta">
+          Completed by ${escapeHtml(repair.completed_by_email)} · ${new Date(repair.completed_at).toLocaleString()}
+        </p>
+      `
+          : ''
+      }
+    `;
+  }
+
+  function renderCommentPanelBody(repair) {
+    const comments = commentsByRepairId.get(repair.id) || [];
+    const thread = comments.length
+      ? `
+      <ul class="comment-thread">
+        ${comments
+          .map(
+            (comment) => `
+          <li class="comment-thread-item">
+            <p class="comment-text">${escapeHtml(comment.comment)}</p>
+            <p class="asset-meta">
+              ${escapeHtml(comment.created_by_email)} · ${formatCommentDate(comment.created_at)}
+            </p>
+          </li>
+        `
+          )
+          .join('')}
+      </ul>
+    `
+      : '';
+
+    return `
+      ${thread}
+      <label>
+        Add a comment
+        <textarea class="new-comment-textarea" rows="2"></textarea>
+      </label>
+      <p class="form-error comment-submit-error" role="alert" hidden></p>
+      <div class="edit-actions">
+        <button type="button" class="save-comment-button" data-id="${repair.id}">Save</button>
+        <button type="button" class="link-button close-comment-button" data-id="${repair.id}">
+          Close
+        </button>
+      </div>
+    `;
+  }
+
+  function renderSidePanel() {
+    if (!panelMode) return '';
+    const repair = repairs.find((r) => r.id === panelRepairId);
     if (!repair) return '';
+
+    const title = panelMode === 'comment' ? 'Comments' : 'Repair history';
+    const content =
+      panelMode === 'comment' ? renderCommentPanelBody(repair) : renderInfoPanelBody(repair);
 
     return `
       <div class="repair-info-panel" id="repair-info-panel">
         <div class="repair-info-header">
-          <h3>Repair history</h3>
+          <h3>${title}</h3>
           <button type="button" class="repair-icon-button" id="close-info-panel" aria-label="Close">
             ${CLOSE_ICON_SVG}
           </button>
         </div>
-        <p class="asset-meta">
-          Added by ${escapeHtml(repair.created_by_email)} · ${new Date(repair.reported_at).toLocaleString()}
-        </p>
-        ${
-          repair.updated_at
-            ? `
-          <p class="asset-meta">
-            Edited by ${escapeHtml(repair.updated_by_email)} · ${new Date(repair.updated_at).toLocaleString()}
-          </p>
-        `
-            : ''
-        }
-        ${
-          repair.completed_at
-            ? `
-          <p class="asset-meta">
-            Completed by ${escapeHtml(repair.completed_by_email)} · ${new Date(repair.completed_at).toLocaleString()}
-          </p>
-        `
-            : ''
-        }
+        ${content}
       </div>
     `;
   }
@@ -297,7 +403,7 @@ export async function renderDetail(container, { navigate, params }) {
               }
             </ul>
           </div>
-          ${renderInfoPanel()}
+          ${renderSidePanel()}
         </div>
       </section>
     `;
@@ -335,7 +441,35 @@ export async function renderDetail(container, { navigate, params }) {
       button.addEventListener('click', (event) => {
         event.stopPropagation();
         const id = button.dataset.id;
-        infoRepairId = infoRepairId === id ? null : id;
+        // Information is exempt from the "one editing action at a time"
+        // group (view-only), but still shares the panel slot with Comment.
+        if (panelMode === 'info' && panelRepairId === id) {
+          panelMode = null;
+          panelRepairId = null;
+        } else {
+          panelMode = 'info';
+          panelRepairId = id;
+        }
+        drawView();
+      });
+    }
+
+    for (const button of repairsSection.querySelectorAll('.repair-comment-button')) {
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const id = button.dataset.id;
+        if (panelMode === 'comment' && panelRepairId === id) {
+          panelMode = null;
+          panelRepairId = null;
+        } else {
+          // Unlike Information, Comment saves new data, so it joins the
+          // "one editing action at a time" group.
+          addingRepair = false;
+          editingRepairId = null;
+          markingCompleteId = null;
+          panelMode = 'comment';
+          panelRepairId = id;
+        }
         drawView();
       });
     }
@@ -343,7 +477,8 @@ export async function renderDetail(container, { navigate, params }) {
     const closeInfoButton = repairsSection.querySelector('#close-info-panel');
     if (closeInfoButton) {
       closeInfoButton.addEventListener('click', () => {
-        infoRepairId = null;
+        panelMode = null;
+        panelRepairId = null;
         drawView();
       });
     }
@@ -352,7 +487,7 @@ export async function renderDetail(container, { navigate, params }) {
       document.removeEventListener('click', outsideInfoClickHandler);
       outsideInfoClickHandler = null;
     }
-    if (infoRepairId) {
+    if (panelRepairId) {
       outsideInfoClickHandler = (event) => {
         // The view may have been torn down by navigating elsewhere
         // without closing the panel first — stop listening rather than
@@ -362,10 +497,16 @@ export async function renderDetail(container, { navigate, params }) {
           return;
         }
         const panel = body.querySelector('#repair-info-panel');
-        if (!panel || panel.contains(event.target) || event.target.closest('.repair-info-button')) {
+        if (
+          !panel ||
+          panel.contains(event.target) ||
+          event.target.closest('.repair-info-button') ||
+          event.target.closest('.repair-comment-button')
+        ) {
           return;
         }
-        infoRepairId = null;
+        panelMode = null;
+        panelRepairId = null;
         drawView();
       };
       document.addEventListener('click', outsideInfoClickHandler);
@@ -373,10 +514,14 @@ export async function renderDetail(container, { navigate, params }) {
 
     const newRepairButton = repairsSection.querySelector('#new-repair-button');
     newRepairButton.addEventListener('click', () => {
-      // Only one repair can be in "new", "edit", or "mark complete" mode
-      // at a time.
+      // Only one repair can be in "new", "edit", "mark complete", or
+      // "comment" mode at a time.
       editingRepairId = null;
       markingCompleteId = null;
+      if (panelMode === 'comment') {
+        panelMode = null;
+        panelRepairId = null;
+      }
       addingRepair = true;
       drawView();
     });
@@ -440,10 +585,14 @@ export async function renderDetail(container, { navigate, params }) {
 
     for (const button of repairsSection.querySelectorAll('.edit-repair-button')) {
       button.addEventListener('click', () => {
-        // Only one repair can be in "new", "edit", or "mark complete"
-        // mode at a time.
+        // Only one repair can be in "new", "edit", "mark complete", or
+        // "comment" mode at a time.
         addingRepair = false;
         markingCompleteId = null;
+        if (panelMode === 'comment') {
+          panelMode = null;
+          panelRepairId = null;
+        }
         editingRepairId = button.dataset.id;
         drawView();
       });
@@ -487,7 +636,6 @@ export async function renderDetail(container, { navigate, params }) {
             updatedAt,
             updatedByEmail,
             completedByEmail: repair.completed_by_email,
-            completedComment: repair.completed_comment,
           });
           if (navigator.onLine) {
             await syncAll();
@@ -506,10 +654,14 @@ export async function renderDetail(container, { navigate, params }) {
 
     for (const button of repairsSection.querySelectorAll('.mark-completed-button')) {
       button.addEventListener('click', () => {
-        // Only one repair can be in "new", "edit", or "mark complete"
-        // mode at a time.
+        // Only one repair can be in "new", "edit", "mark complete", or
+        // "comment" mode at a time.
         addingRepair = false;
         editingRepairId = null;
+        if (panelMode === 'comment') {
+          panelMode = null;
+          panelRepairId = null;
+        }
         markingCompleteId = button.dataset.id;
         drawView();
       });
@@ -535,8 +687,8 @@ export async function renderDetail(container, { navigate, params }) {
           const session = await getSession();
           const completedAt = new Date().toISOString();
           const completedByEmail = session?.user?.email ?? 'Unknown';
-          // Optional — save no comment rather than an empty string when
-          // the box was left blank.
+          // Optional — the completion comment, if entered, becomes this
+          // repair's first (or next) thread entry rather than its own field.
           const completedComment = textarea.value.trim() || null;
 
           await queueRepair({
@@ -549,20 +701,87 @@ export async function renderDetail(container, { navigate, params }) {
             updatedAt: repair.updated_at,
             updatedByEmail: repair.updated_by_email,
             completedByEmail,
-            completedComment,
           });
+
+          if (completedComment) {
+            await queueRepairComment({
+              id: crypto.randomUUID(),
+              repairId: repair.id,
+              comment: completedComment,
+              createdByEmail: completedByEmail,
+              createdAt: completedAt,
+            });
+          }
+
           if (navigator.onLine) {
             await syncAll();
           }
 
           repair.completed_at = completedAt;
           repair.completed_by_email = completedByEmail;
-          repair.completed_comment = completedComment;
+          if (completedComment) {
+            const list = commentsByRepairId.get(repair.id) || [];
+            list.push({
+              comment: completedComment,
+              created_by_email: completedByEmail,
+              created_at: completedAt,
+            });
+            commentsByRepairId.set(repair.id, list);
+          }
           markingCompleteId = null;
           drawView();
         } catch {
           button.disabled = false;
         }
+      });
+    }
+
+    for (const button of repairsSection.querySelectorAll('.save-comment-button')) {
+      button.addEventListener('click', async () => {
+        const repairId = button.dataset.id;
+        const panel = repairsSection.querySelector('#repair-info-panel');
+        const textarea = panel.querySelector('.new-comment-textarea');
+        const errorEl = panel.querySelector('.comment-submit-error');
+        const text = textarea.value.trim();
+        if (!text) return;
+
+        errorEl.hidden = true;
+        button.disabled = true;
+        try {
+          const session = await getSession();
+          const createdByEmail = session?.user?.email ?? 'Unknown';
+          const createdAt = new Date().toISOString();
+
+          await queueRepairComment({
+            id: crypto.randomUUID(),
+            repairId,
+            comment: text,
+            createdByEmail,
+            createdAt,
+          });
+          if (navigator.onLine) {
+            await syncAll();
+          }
+
+          const list = commentsByRepairId.get(repairId) || [];
+          list.push({ comment: text, created_by_email: createdByEmail, created_at: createdAt });
+          commentsByRepairId.set(repairId, list);
+          // Panel stays open — panelMode/panelRepairId are untouched — and
+          // the fresh markup naturally clears the textarea.
+          drawView();
+        } catch (err) {
+          errorEl.hidden = false;
+          errorEl.textContent = err.message || 'Could not save this comment. Try again.';
+          button.disabled = false;
+        }
+      });
+    }
+
+    for (const button of repairsSection.querySelectorAll('.close-comment-button')) {
+      button.addEventListener('click', () => {
+        panelMode = null;
+        panelRepairId = null;
+        drawView();
       });
     }
   }

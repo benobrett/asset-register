@@ -6,9 +6,10 @@
 import { openDB } from 'idb';
 
 const DB_NAME = 'asset-register';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const ASSET_STORE = 'assets';
 const REPAIR_STORE = 'repairs';
+const REPAIR_COMMENT_STORE = 'repairComments';
 
 let dbPromise;
 
@@ -22,6 +23,18 @@ function getDb() {
         if (oldVersion < 2) {
           db.createObjectStore(REPAIR_STORE, { keyPath: 'id' });
         }
+        if (oldVersion < 3) {
+          db.createObjectStore(REPAIR_COMMENT_STORE, { keyPath: 'id' });
+        }
+      },
+      // Without this, a stale tab left open from before a DB_VERSION bump
+      // holds the old connection open, and this tab's openDB() call just
+      // hangs waiting for it to close - no error, no timeout, nothing.
+      // Closing our own end here lets whichever tab is actually upgrading
+      // proceed instead of blocking forever.
+      blocking() {
+        dbPromise.then((db) => db.close());
+        dbPromise = null;
       },
     });
   }
@@ -58,4 +71,20 @@ export async function getUnsyncedRepairs() {
 export async function markRepairSynced(id) {
   const db = await getDb();
   await db.delete(REPAIR_STORE, id);
+}
+
+export async function queueRepairComment(record) {
+  const db = await getDb();
+  await db.put(REPAIR_COMMENT_STORE, { ...record, synced: false });
+}
+
+export async function getUnsyncedRepairComments() {
+  const db = await getDb();
+  const all = await db.getAll(REPAIR_COMMENT_STORE);
+  return all.filter((comment) => !comment.synced);
+}
+
+export async function markRepairCommentSynced(id) {
+  const db = await getDb();
+  await db.delete(REPAIR_COMMENT_STORE, id);
 }

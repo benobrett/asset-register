@@ -6,8 +6,10 @@ import { supabase, PHOTO_BUCKET } from './supabase.js';
 import {
   getUnsyncedAssets,
   getUnsyncedRepairs,
+  getUnsyncedRepairComments,
   markAssetSynced,
   markRepairSynced,
+  markRepairCommentSynced,
 } from './db.js';
 
 export async function syncQueuedAssets() {
@@ -60,7 +62,6 @@ export async function syncQueuedRepairs() {
         updated_at: repair.updatedAt ?? null,
         updated_by_email: repair.updatedByEmail ?? null,
         completed_by_email: repair.completedByEmail ?? null,
-        completed_comment: repair.completedComment ?? null,
       });
       if (error) throw error;
 
@@ -74,12 +75,38 @@ export async function syncQueuedRepairs() {
   return { succeeded, failed };
 }
 
-// Assets must sync before repairs — asset_repairs.asset_id is a foreign key,
-// so a repair queued against an asset that hasn't synced yet would fail.
+export async function syncQueuedRepairComments() {
+  const pending = await getUnsyncedRepairComments();
+  const succeeded = [];
+  const failed = [];
+
+  for (const comment of pending) {
+    try {
+      const { error } = await supabase.from('repair_comments').upsert({
+        id: comment.id,
+        repair_id: comment.repairId,
+        comment: comment.comment,
+        created_by_email: comment.createdByEmail,
+      });
+      if (error) throw error;
+
+      await markRepairCommentSynced(comment.id);
+      succeeded.push(comment.id);
+    } catch (err) {
+      failed.push({ id: comment.id, error: err.message || String(err) });
+    }
+  }
+
+  return { succeeded, failed };
+}
+
+// Assets before repairs before comments — each references the row before
+// it as a foreign key, so syncing out of order would fail.
 export async function syncAll() {
   const assets = await syncQueuedAssets();
   const repairs = await syncQueuedRepairs();
-  return { assets, repairs };
+  const repairComments = await syncQueuedRepairComments();
+  return { assets, repairs, repairComments };
 }
 
 export function watchConnectivity() {
