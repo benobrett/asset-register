@@ -1,7 +1,18 @@
 import { supabase } from './supabase.js';
 
 export async function signUp(email, password) {
-  const { data, error } = await supabase.auth.signUp({ email, password });
+  // Without this, Supabase falls back to the dashboard's single "Site URL"
+  // setting for the confirmation link - fine if that happens to match
+  // wherever signup was tested last, but wrong the moment there's more
+  // than one environment (local dev vs. the deployed GitHub Pages URL).
+  // This targets wherever the app is actually running instead.
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      emailRedirectTo: `${window.location.origin}${import.meta.env.BASE_URL}`,
+    },
+  });
   if (error) throw error;
   return data;
 }
