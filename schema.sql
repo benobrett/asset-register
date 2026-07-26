@@ -70,13 +70,25 @@ create table asset_repairs (
   updated_at timestamptz,
   updated_by_email text,
   -- Same pattern as updated_at/updated_by_email: null until the repair
-  -- is actually marked complete. completed_comment is optional — left
-  -- null (not an empty string) when nothing was entered.
-  completed_by_email text,
-  completed_comment text
+  -- is actually marked complete.
+  completed_by_email text
 );
 
 create index asset_repairs_asset_id_idx on asset_repairs (asset_id);
+
+-- A thread, not a single field — a repair can pick up more than one
+-- comment over its life (the completion comment is just its first
+-- entry). uuid id, same reasoning as asset_repairs: the client can
+-- generate it offline with no reconciliation step once it syncs.
+create table repair_comments (
+  id uuid primary key default gen_random_uuid(),
+  repair_id uuid references asset_repairs(id) on delete cascade not null,
+  comment text not null,
+  created_by_email text not null,
+  created_at timestamptz not null default now()
+);
+
+create index repair_comments_repair_id_idx on repair_comments (repair_id);
 
 alter table assets enable row level security;
 
@@ -96,5 +108,12 @@ alter table asset_repairs enable row level security;
 
 create policy "Logged-in users can manage all repairs"
   on asset_repairs for all
+  using (auth.uid() is not null)
+  with check (auth.uid() is not null);
+
+alter table repair_comments enable row level security;
+
+create policy "Logged-in users can manage all repair comments"
+  on repair_comments for all
   using (auth.uid() is not null)
   with check (auth.uid() is not null);

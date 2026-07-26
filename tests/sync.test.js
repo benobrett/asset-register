@@ -7,6 +7,8 @@ const {
   markAssetSyncedMock,
   getUnsyncedRepairsMock,
   markRepairSyncedMock,
+  getUnsyncedRepairCommentsMock,
+  markRepairCommentSyncedMock,
 } = vi.hoisted(() => ({
   storageUpload: vi.fn(),
   tableUpsert: vi.fn(),
@@ -14,6 +16,8 @@ const {
   markAssetSyncedMock: vi.fn(),
   getUnsyncedRepairsMock: vi.fn(),
   markRepairSyncedMock: vi.fn(),
+  getUnsyncedRepairCommentsMock: vi.fn(),
+  markRepairCommentSyncedMock: vi.fn(),
 }));
 
 vi.mock('../src/supabase.js', () => ({
@@ -29,9 +33,13 @@ vi.mock('../src/db.js', () => ({
   markAssetSynced: markAssetSyncedMock,
   getUnsyncedRepairs: getUnsyncedRepairsMock,
   markRepairSynced: markRepairSyncedMock,
+  getUnsyncedRepairComments: getUnsyncedRepairCommentsMock,
+  markRepairCommentSynced: markRepairCommentSyncedMock,
 }));
 
-const { syncQueuedAssets, syncQueuedRepairs, syncAll } = await import('../src/sync.js');
+const { syncQueuedAssets, syncQueuedRepairs, syncQueuedRepairComments, syncAll } = await import(
+  '../src/sync.js'
+);
 
 beforeEach(() => {
   storageUpload.mockReset().mockResolvedValue({ error: null });
@@ -40,6 +48,8 @@ beforeEach(() => {
   markAssetSyncedMock.mockReset().mockResolvedValue(undefined);
   getUnsyncedRepairsMock.mockReset().mockResolvedValue([]);
   markRepairSyncedMock.mockReset().mockResolvedValue(undefined);
+  getUnsyncedRepairCommentsMock.mockReset().mockResolvedValue([]);
+  markRepairCommentSyncedMock.mockReset().mockResolvedValue(undefined);
 });
 
 describe('syncQueuedAssets', () => {
@@ -134,7 +144,6 @@ describe('syncQueuedRepairs', () => {
       updated_at: null,
       updated_by_email: null,
       completed_by_email: null,
-      completed_comment: null,
     });
     expect(markRepairSyncedMock).toHaveBeenCalledWith('r1');
     expect(result).toEqual({ succeeded: ['r1'], failed: [] });
@@ -166,11 +175,10 @@ describe('syncQueuedRepairs', () => {
       updated_at: '2026-07-25T11:00:00.000Z',
       updated_by_email: 'sam@example.com',
       completed_by_email: null,
-      completed_comment: null,
     });
   });
 
-  it('includes completed-by/comment fields when the repair has been completed', async () => {
+  it('includes the completed-by field when the repair has been completed', async () => {
     getUnsyncedRepairsMock.mockResolvedValue([
       {
         id: 'r4',
@@ -180,7 +188,6 @@ describe('syncQueuedRepairs', () => {
         completedAt: '2026-07-25T12:00:00.000Z',
         createdByEmail: 'jane@example.com',
         completedByEmail: 'sam@example.com',
-        completedComment: 'Replaced the armrest bolt.',
       },
     ]);
 
@@ -196,7 +203,6 @@ describe('syncQueuedRepairs', () => {
       updated_at: null,
       updated_by_email: null,
       completed_by_email: 'sam@example.com',
-      completed_comment: 'Replaced the armrest bolt.',
     });
   });
 
@@ -220,8 +226,49 @@ describe('syncQueuedRepairs', () => {
   });
 });
 
+describe('syncQueuedRepairComments', () => {
+  it('upserts the comment row and marks it synced', async () => {
+    getUnsyncedRepairCommentsMock.mockResolvedValue([
+      {
+        id: 'c1',
+        repairId: 'r1',
+        comment: 'Replaced the armrest bolt.',
+        createdByEmail: 'sam@example.com',
+      },
+    ]);
+
+    const result = await syncQueuedRepairComments();
+
+    expect(tableUpsert).toHaveBeenCalledWith({
+      id: 'c1',
+      repair_id: 'r1',
+      comment: 'Replaced the armrest bolt.',
+      created_by_email: 'sam@example.com',
+    });
+    expect(markRepairCommentSyncedMock).toHaveBeenCalledWith('c1');
+    expect(result).toEqual({ succeeded: ['c1'], failed: [] });
+  });
+
+  it('leaves a comment queued and reports the failure when the upsert fails', async () => {
+    getUnsyncedRepairCommentsMock.mockResolvedValue([
+      {
+        id: 'c2',
+        repairId: 'r1',
+        comment: 'Ordered a replacement part.',
+        createdByEmail: 'sam@example.com',
+      },
+    ]);
+    tableUpsert.mockResolvedValue({ error: { message: 'network error' } });
+
+    const result = await syncQueuedRepairComments();
+
+    expect(markRepairCommentSyncedMock).not.toHaveBeenCalled();
+    expect(result).toEqual({ succeeded: [], failed: [{ id: 'c2', error: 'network error' }] });
+  });
+});
+
 describe('syncAll', () => {
-  it('syncs assets before repairs', async () => {
+  it('syncs assets before repairs before repair comments', async () => {
     const order = [];
     getUnsyncedAssetsMock.mockImplementation(async () => {
       order.push('assets');
@@ -231,9 +278,13 @@ describe('syncAll', () => {
       order.push('repairs');
       return [];
     });
+    getUnsyncedRepairCommentsMock.mockImplementation(async () => {
+      order.push('repairComments');
+      return [];
+    });
 
     await syncAll();
 
-    expect(order).toEqual(['assets', 'repairs']);
+    expect(order).toEqual(['assets', 'repairs', 'repairComments']);
   });
 });
