@@ -212,7 +212,7 @@ export function renderRegister(container, { navigate }) {
         <td>${formatAssetId(asset.asset_number)}</td>
         <td>${escapeHtml(asset.asset_name)}</td>
         <td class="asset-table-description">${escapeHtml(asset.description)}</td>
-        <td>${hasOutstandingRepair ? '<span class="repair-tag">🔧 Outstanding</span>' : 'OK'}</td>
+        <td>${hasOutstandingRepair ? '<span class="repair-tag">🔧 To do</span>' : 'OK'}</td>
         <td>${outstandingCount}</td>
       `;
       row.addEventListener('click', () => navigate(`#/asset/${asset.id}`));
