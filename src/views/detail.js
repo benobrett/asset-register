@@ -125,13 +125,17 @@ export async function renderDetail(container, { navigate, params }) {
   let editingRepairId = null;
   let addingRepair = false;
   let markingCompleteId = null;
-  // Shared right-hand slot for Information and Comment — only one repair's
-  // panel shows at a time, in either mode. Comment participates in the
-  // "one editing action at a time" group with addingRepair/editingRepairId/
-  // markingCompleteId (it saves new data); Information is exempt from that
-  // group since it's view-only, but still shares this slot with Comment.
-  let panelRepairId = null;
-  let panelMode = null; // 'info' | 'comment'
+  // Comment expands the repair item in place and joins the "one editing
+  // action at a time" group (it saves new data) — opening it cancels any
+  // of the above, and vice versa. Information stays exempt (view-only),
+  // opens in its own right-hand panel, and can stay open alongside an
+  // expanded Comment section.
+  let commentRepairId = null;
+  // Tracks commentRepairId as of the last paint, so the expand/collapse
+  // transition has a real "from" state to animate from even though the
+  // whole section is torn down and rebuilt on every drawView() call.
+  let previousCommentRepairId = null;
+  let infoRepairId = null;
   let outsideInfoClickHandler = null;
   let repairSortKey = 'newest';
 
@@ -189,21 +193,27 @@ export async function renderDetail(container, { navigate, params }) {
       ? '<p class="repair-status repair-status-completed">✓ Repair completed</p>'
       : '<span class="repair-status repair-status-todo">To do</span>';
 
+    const isCommentExpanded = repair.id === commentRepairId;
+    const wasCommentExpanded = repair.id === previousCommentRepairId;
+
     const repairComments = commentsByRepairId.get(repair.id) || [];
     const latestComment = repairComments[repairComments.length - 1];
-    const commentBlock = latestComment
-      ? `
+    // Redundant once expanded — the same comment is the last entry in the
+    // full thread below, so the preview line is hidden while open.
+    const commentBlock =
+      latestComment && !isCommentExpanded
+        ? `
       <p class="repair-comment-preview">
         ${escapeHtml(latestComment.comment)}
         <span class="asset-meta">— ${escapeHtml(latestComment.created_by_email)} · ${formatCommentDate(latestComment.created_at)}</span>
       </p>
     `
-      : '';
+        : '';
 
-    const panelOpenForThis = panelMode && repair.id === panelRepairId;
+    const infoOpenForThis = repair.id === infoRepairId;
 
     return `
-      <li class="repair-item ${panelOpenForThis ? 'repair-item-panel-open' : ''}" data-id="${repair.id}">
+      <li class="repair-item ${infoOpenForThis ? 'repair-item-panel-open' : ''}" data-id="${repair.id}">
         <div class="repair-item-top">
           <p class="repair-description">${escapeHtml(repair.description)}</p>
           ${statusSlot}
@@ -217,7 +227,7 @@ export async function renderDetail(container, { navigate, params }) {
             type="button"
             class="link-button repair-info-button"
             data-id="${repair.id}"
-            aria-expanded="${panelMode === 'info' && repair.id === panelRepairId}"
+            aria-expanded="${infoOpenForThis}"
           >
             ${INFO_ICON_SVG} Information
           </button>
@@ -225,7 +235,7 @@ export async function renderDetail(container, { navigate, params }) {
             type="button"
             class="link-button repair-comment-button"
             data-id="${repair.id}"
-            aria-expanded="${panelMode === 'comment' && repair.id === panelRepairId}"
+            aria-expanded="${isCommentExpanded}"
           >
             ${COMMENT_ICON_SVG} Comment
           </button>
@@ -238,6 +248,11 @@ export async function renderDetail(container, { navigate, params }) {
           `
               : ''
           }
+        </div>
+        <div class="repair-comment-expand ${wasCommentExpanded ? 'is-open' : ''}" data-repair-id="${repair.id}">
+          <div class="repair-comment-expand-inner">
+            ${renderCommentExpandBody(repair)}
+          </div>
         </div>
       </li>
     `;
@@ -285,7 +300,11 @@ export async function renderDetail(container, { navigate, params }) {
     `;
   }
 
-  function renderCommentPanelBody(repair) {
+  // Always rendered (content included regardless of expanded state) so the
+  // grid-row expand/collapse transition has something to reveal — visibility
+  // is purely a CSS concern (.repair-comment-expand's grid-template-rows),
+  // not a matter of whether this markup exists.
+  function renderCommentExpandBody(repair) {
     const comments = commentsByRepairId.get(repair.id) || [];
     const thread = comments.length
       ? `
@@ -307,6 +326,17 @@ export async function renderDetail(container, { navigate, params }) {
       : '';
 
     return `
+      <div class="repair-comment-expand-header">
+        <h3>Comments</h3>
+        <button
+          type="button"
+          class="repair-icon-button collapse-comment-button"
+          data-id="${repair.id}"
+          aria-label="Close"
+        >
+          ${CLOSE_ICON_SVG}
+        </button>
+      </div>
       ${thread}
       <label>
         Add a comment
@@ -315,31 +345,27 @@ export async function renderDetail(container, { navigate, params }) {
       <p class="form-error comment-submit-error" role="alert" hidden></p>
       <div class="edit-actions">
         <button type="button" class="save-comment-button" data-id="${repair.id}">Save</button>
-        <button type="button" class="link-button close-comment-button" data-id="${repair.id}">
+        <button type="button" class="link-button collapse-comment-button" data-id="${repair.id}">
           Close
         </button>
       </div>
     `;
   }
 
-  function renderSidePanel() {
-    if (!panelMode) return '';
-    const repair = repairs.find((r) => r.id === panelRepairId);
+  function renderInfoPanel() {
+    if (!infoRepairId) return '';
+    const repair = repairs.find((r) => r.id === infoRepairId);
     if (!repair) return '';
-
-    const title = panelMode === 'comment' ? 'Comments' : 'Repair history';
-    const content =
-      panelMode === 'comment' ? renderCommentPanelBody(repair) : renderInfoPanelBody(repair);
 
     return `
       <div class="repair-info-panel" id="repair-info-panel">
         <div class="repair-info-header">
-          <h3>${title}</h3>
+          <h3>Repair history</h3>
           <button type="button" class="repair-icon-button" id="close-info-panel" aria-label="Close">
             ${CLOSE_ICON_SVG}
           </button>
         </div>
-        ${content}
+        ${renderInfoPanelBody(repair)}
       </div>
     `;
   }
@@ -403,7 +429,7 @@ export async function renderDetail(container, { navigate, params }) {
               }
             </ul>
           </div>
-          ${renderSidePanel()}
+          ${renderInfoPanel()}
         </div>
       </section>
     `;
@@ -441,15 +467,9 @@ export async function renderDetail(container, { navigate, params }) {
       button.addEventListener('click', (event) => {
         event.stopPropagation();
         const id = button.dataset.id;
-        // Information is exempt from the "one editing action at a time"
-        // group (view-only), but still shares the panel slot with Comment.
-        if (panelMode === 'info' && panelRepairId === id) {
-          panelMode = null;
-          panelRepairId = null;
-        } else {
-          panelMode = 'info';
-          panelRepairId = id;
-        }
+        // Exempt from the "one editing action at a time" group (view-only)
+        // and independent of Comment — can stay open alongside it.
+        infoRepairId = infoRepairId === id ? null : id;
         drawView();
       });
     }
@@ -458,18 +478,23 @@ export async function renderDetail(container, { navigate, params }) {
       button.addEventListener('click', (event) => {
         event.stopPropagation();
         const id = button.dataset.id;
-        if (panelMode === 'comment' && panelRepairId === id) {
-          panelMode = null;
-          panelRepairId = null;
+        if (commentRepairId === id) {
+          commentRepairId = null;
         } else {
           // Unlike Information, Comment saves new data, so it joins the
           // "one editing action at a time" group.
           addingRepair = false;
           editingRepairId = null;
           markingCompleteId = null;
-          panelMode = 'comment';
-          panelRepairId = id;
+          commentRepairId = id;
         }
+        drawView();
+      });
+    }
+
+    for (const button of repairsSection.querySelectorAll('.collapse-comment-button')) {
+      button.addEventListener('click', () => {
+        commentRepairId = null;
         drawView();
       });
     }
@@ -477,8 +502,7 @@ export async function renderDetail(container, { navigate, params }) {
     const closeInfoButton = repairsSection.querySelector('#close-info-panel');
     if (closeInfoButton) {
       closeInfoButton.addEventListener('click', () => {
-        panelMode = null;
-        panelRepairId = null;
+        infoRepairId = null;
         drawView();
       });
     }
@@ -487,7 +511,7 @@ export async function renderDetail(container, { navigate, params }) {
       document.removeEventListener('click', outsideInfoClickHandler);
       outsideInfoClickHandler = null;
     }
-    if (panelRepairId) {
+    if (infoRepairId) {
       outsideInfoClickHandler = (event) => {
         // The view may have been torn down by navigating elsewhere
         // without closing the panel first — stop listening rather than
@@ -497,20 +521,23 @@ export async function renderDetail(container, { navigate, params }) {
           return;
         }
         const panel = body.querySelector('#repair-info-panel');
-        if (
-          !panel ||
-          panel.contains(event.target) ||
-          event.target.closest('.repair-info-button') ||
-          event.target.closest('.repair-comment-button')
-        ) {
+        if (!panel || panel.contains(event.target) || event.target.closest('.repair-info-button')) {
           return;
         }
-        panelMode = null;
-        panelRepairId = null;
+        infoRepairId = null;
         drawView();
       };
       document.addEventListener('click', outsideInfoClickHandler);
     }
+
+    // The expand/collapse transition needs a real "from" state to animate
+    // from on the next render — see previousCommentRepairId's declaration.
+    requestAnimationFrame(() => {
+      for (const el of repairsSection.querySelectorAll('.repair-comment-expand')) {
+        el.classList.toggle('is-open', el.dataset.repairId === commentRepairId);
+      }
+      previousCommentRepairId = commentRepairId;
+    });
 
     const newRepairButton = repairsSection.querySelector('#new-repair-button');
     newRepairButton.addEventListener('click', () => {
@@ -518,10 +545,7 @@ export async function renderDetail(container, { navigate, params }) {
       // "comment" mode at a time.
       editingRepairId = null;
       markingCompleteId = null;
-      if (panelMode === 'comment') {
-        panelMode = null;
-        panelRepairId = null;
-      }
+      commentRepairId = null;
       addingRepair = true;
       drawView();
     });
@@ -589,10 +613,7 @@ export async function renderDetail(container, { navigate, params }) {
         // "comment" mode at a time.
         addingRepair = false;
         markingCompleteId = null;
-        if (panelMode === 'comment') {
-          panelMode = null;
-          panelRepairId = null;
-        }
+        commentRepairId = null;
         editingRepairId = button.dataset.id;
         drawView();
       });
@@ -658,10 +679,7 @@ export async function renderDetail(container, { navigate, params }) {
         // "comment" mode at a time.
         addingRepair = false;
         editingRepairId = null;
-        if (panelMode === 'comment') {
-          panelMode = null;
-          panelRepairId = null;
-        }
+        commentRepairId = null;
         markingCompleteId = button.dataset.id;
         drawView();
       });
@@ -739,9 +757,9 @@ export async function renderDetail(container, { navigate, params }) {
     for (const button of repairsSection.querySelectorAll('.save-comment-button')) {
       button.addEventListener('click', async () => {
         const repairId = button.dataset.id;
-        const panel = repairsSection.querySelector('#repair-info-panel');
-        const textarea = panel.querySelector('.new-comment-textarea');
-        const errorEl = panel.querySelector('.comment-submit-error');
+        const item = repairsSection.querySelector(`.repair-item[data-id="${repairId}"]`);
+        const textarea = item.querySelector('.new-comment-textarea');
+        const errorEl = item.querySelector('.comment-submit-error');
         const text = textarea.value.trim();
         if (!text) return;
 
@@ -766,8 +784,8 @@ export async function renderDetail(container, { navigate, params }) {
           const list = commentsByRepairId.get(repairId) || [];
           list.push({ comment: text, created_by_email: createdByEmail, created_at: createdAt });
           commentsByRepairId.set(repairId, list);
-          // Panel stays open — panelMode/panelRepairId are untouched — and
-          // the fresh markup naturally clears the textarea.
+          // Stays expanded — commentRepairId is untouched — and the fresh
+          // markup naturally clears the textarea.
           drawView();
         } catch (err) {
           errorEl.hidden = false;
@@ -777,13 +795,6 @@ export async function renderDetail(container, { navigate, params }) {
       });
     }
 
-    for (const button of repairsSection.querySelectorAll('.close-comment-button')) {
-      button.addEventListener('click', () => {
-        panelMode = null;
-        panelRepairId = null;
-        drawView();
-      });
-    }
   }
 
   function drawEditForm() {
