@@ -1,5 +1,7 @@
 import { getSession, onAuthChange, isProfileComplete, resetProfileCache } from './auth.js';
 import { renderLogin } from './views/login.js';
+import { renderForgotPassword } from './views/forgotPassword.js';
+import { renderResetPassword } from './views/resetPassword.js';
 import { renderRegister } from './views/register.js';
 import { renderCapture } from './views/capture.js';
 import { renderDetail } from './views/detail.js';
@@ -10,11 +12,20 @@ const app = document.getElementById('app');
 
 const routes = [
   { pattern: /^#\/login$/, view: renderLogin, public: true },
+  { pattern: /^#\/forgot-password$/, view: renderForgotPassword, public: true },
+  { pattern: /^#\/reset-password$/, view: renderResetPassword, public: true },
   { pattern: /^#\/complete-profile$/, view: renderCompleteProfile },
   { pattern: /^#\/register$/, view: renderRegister },
   { pattern: /^#\/capture$/, view: renderCapture },
   { pattern: /^#\/asset\/(?<id>[^/]+)$/, view: renderDetail },
 ];
+
+// Reachable with no session at all - #/login and #/forgot-password for the
+// obvious reason (nobody's logged in yet), and #/reset-password because a
+// stale/reused recovery link means the PKCE code exchange never actually
+// established a session; that view has its own "expired link" branch for
+// that case rather than being bounced to #/login before it can show it.
+const PUBLIC_HASHES = new Set(['#/login', '#/forgot-password', '#/reset-password']);
 
 function navigate(hash) {
   if (window.location.hash === hash) {
@@ -33,7 +44,7 @@ async function route() {
     currentSession = await getSession();
   }
 
-  if (!currentSession && hash !== '#/login') {
+  if (!currentSession && !PUBLIC_HASHES.has(hash)) {
     window.location.hash = '#/login';
     return;
   }
@@ -50,8 +61,16 @@ async function route() {
 
   // Blocks entry to the rest of the app until the account has a name on
   // file - legacy accounts from before this existed, and any account
-  // that never went through the signup form's name fields.
-  if (currentSession && hash !== '#/complete-profile' && !(await isProfileComplete())) {
+  // that never went through the signup form's name fields. #/reset-password
+  // is exempt too: clicking a recovery link establishes a session, and
+  // without this exemption that session would get hijacked straight to
+  // #/complete-profile before the user ever gets to set their password.
+  if (
+    currentSession &&
+    hash !== '#/complete-profile' &&
+    hash !== '#/reset-password' &&
+    !(await isProfileComplete())
+  ) {
     window.location.hash = '#/complete-profile';
     return;
   }

@@ -62,3 +62,26 @@ export function validateNameForm({ firstName, lastName }) {
 
   return { valid: Object.keys(errors).length === 0, errors };
 }
+
+// Matches Supabase Auth's own default minimum - shared by signup and the
+// password-reset screen so the reset screen can never accept a password
+// signup would have rejected.
+export function validatePassword(password) {
+  if (!password || password.length < 6) {
+    return 'Password must be at least 6 characters.';
+  }
+  return null;
+}
+
+export function validatePasswordResetForm({ password, confirmPassword }) {
+  const errors = {};
+
+  const passwordError = validatePassword(password);
+  if (passwordError) {
+    errors.password = passwordError;
+  } else if (password !== confirmPassword) {
+    errors.confirmPassword = 'Passwords do not match.';
+  }
+
+  return { valid: Object.keys(errors).length === 0, errors };
+}

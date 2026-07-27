@@ -34,6 +34,24 @@ export async function signIn(email, password) {
   return data;
 }
 
+// Supabase deliberately doesn't reveal whether the address has an account
+// (this call resolves the same either way) - the caller must not either,
+// so there's no "email not found" branch to add here.
+export async function requestPasswordReset(email) {
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${window.location.origin}${import.meta.env.BASE_URL}#/reset-password`,
+  });
+  if (error) throw error;
+}
+
+// Only valid once the recovery link has already established a session
+// (PKCE code exchange, handled automatically by the client on load) -
+// the caller is responsible for checking that first.
+export async function updatePassword(password) {
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) throw error;
+}
+
 export async function signOut() {
   const { error } = await supabase.auth.signOut();
   if (error) throw error;
