@@ -196,3 +196,16 @@ create policy "Users can set their own name once"
 -- Tracks remaining legacy accounts still to be prompted. Progress query:
 --   select count(*) from profiles where first_name is null or last_name is null;
 create index profiles_missing_name_idx on profiles (id) where first_name is null or last_name is null;
+
+-- Storage policies live on storage.objects, separate from the table
+-- policies above - creating the asset-photos bucket itself grants no
+-- access at all by default. Same shared-register pattern as the other
+-- tables: any logged-in user can upload/read/replace/delete any photo.
+-- (Documented here retroactively - this already existed on the
+-- production project, set up directly in the dashboard before schema.sql
+-- tracked it, and was only written down when the separate e2e Supabase
+-- project needed the same setup and had none of it.)
+create policy "Logged-in users can manage asset photos"
+  on storage.objects for all
+  using (bucket_id = 'asset-photos' and auth.uid() is not null)
+  with check (bucket_id = 'asset-photos' and auth.uid() is not null);
