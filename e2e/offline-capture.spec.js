@@ -42,10 +42,16 @@ test('captures a new asset offline and syncs it once back online', async ({ page
   await page.getByRole('button', { name: 'Save asset' }).click();
 
   // Saving queues to IndexedDB and navigates unconditionally - it doesn't
-  // wait on a network round trip, so this should succeed with no error
-  // shown even with no connection at all.
+  // wait on a network round trip, so this should succeed even with no
+  // connection at all. The register view's own live query fails while
+  // offline, but register.js falls back to showing this device's queued
+  // assets instead of just an error - so the just-saved asset should be
+  // visible right here, not only in IndexedDB.
   await expect(page).toHaveURL(/#\/register$/);
-  await expect(page.getByRole('alert')).not.toBeVisible();
+  // The default (desktop-width) Chromium viewport shows the table layout,
+  // not the card list - both exist in the DOM at once (see #58), so an
+  // unscoped locator would be ambiguous and the card-list one is hidden.
+  await expect(page.locator('#asset-table-body').getByText(assetName)).toBeVisible();
   await expect(await findQueuedAsset(page, assetName)).toBe(true);
 
   try {

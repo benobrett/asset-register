@@ -101,18 +101,35 @@ export function needsNamePrompt(profile) {
 // from a previous account can never leak into a new one.
 let profileCompleteCache = null;
 
+// Offline, a fetch doesn't always fail cleanly and quickly - it can just
+// hang with no response at all rather than rejecting (observed directly:
+// a genuinely offline browser sometimes leaves this request pending
+// indefinitely instead of erroring). Without a bound on it, the "fail
+// open" promise below isn't actually kept - route() would just hang
+// forever awaiting a promise that never settles either way.
+const PROFILE_CHECK_TIMEOUT_MS = 5000;
+
 export async function isProfileComplete() {
   if (profileCompleteCache !== null) return profileCompleteCache;
   try {
-    const profile = await getProfile();
+    const profile = await Promise.race([
+      getProfile(),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Profile check timed out')), PROFILE_CHECK_TIMEOUT_MS)
+      ),
+    ]);
     profileCompleteCache = !needsNamePrompt(profile);
   } catch (err) {
     // This is an onboarding nicety, not an access control check - a
-    // failed query here (network blip, migration not yet applied)
-    // should never be the thing that locks a field worker out of the
-    // whole app. Fail open: don't cache the failure, just let them
-    // through and try again next navigation.
+    // failed (or timed-out) query here should never be the thing that
+    // locks a field worker out of the whole app. Fail open - and cache
+    // it: while genuinely offline every navigation would otherwise pay
+    // this same bounded timeout again, stacking into a real, user-visible
+    // stall on every single hash change. resetProfileCache() (tied to
+    // actual sign-in/out) clears this the same as any other cached
+    // result, so reconnecting and signing in again re-checks properly.
     console.error('Could not check profile completeness:', err);
+    profileCompleteCache = true;
     return true;
   }
   return profileCompleteCache;

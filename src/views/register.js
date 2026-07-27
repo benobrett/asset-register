@@ -2,8 +2,23 @@ import { supabase } from '../supabase.js';
 import { signOut } from '../auth.js';
 import { formatAssetId } from '../format.js';
 import { confirmDialog } from '../confirmDialog.js';
+import { getUnsyncedAssets } from '../db.js';
 
 const SORT_STORAGE_KEY = 'assetSort';
+
+// Offline, a fetch doesn't always fail cleanly and quickly - it can hang
+// with no response at all rather than rejecting. Without a bound on it,
+// this view would just sit on "Loading…" forever instead of ever reaching
+// the fallback below that shows this device's queued assets - exactly the
+// case #60 exists to handle.
+const QUERY_TIMEOUT_MS = 3000;
+
+function withTimeout(promise, fallback) {
+  return Promise.race([
+    promise,
+    new Promise((resolve) => setTimeout(() => resolve(fallback), QUERY_TIMEOUT_MS)),
+  ]);
+}
 
 const SORT_OPTIONS = {
   newest: { column: 'recorded_at', ascending: false },
@@ -86,10 +101,45 @@ export function renderRegister(container, { navigate }) {
   const storedSort = sessionStorage.getItem(SORT_STORAGE_KEY);
   sortSelect.value = storedSort && SORT_OPTIONS[storedSort] ? storedSort : 'newest';
 
+  // A queued-but-not-yet-synced asset (db.js's shape: assetName/
+  // description/recordedAt, camelCase) rather than a live one (Postgres's
+  // asset_name/description/recorded_at). No asset_number yet - that's a
+  // Postgres identity column, assigned only once the row actually
+  // exists server-side - and no repair data, since asset_repairs is a
+  // live-only query too. Not clickable and has no delete button: this
+  // isn't a real row yet, so there's nowhere to navigate to and no
+  // matching server-side record to delete.
+  function appendPendingItem(asset) {
+    const item = document.createElement('li');
+    item.className = 'asset-list-item';
+    item.innerHTML = `
+      <span class="asset-list-button is-pending" aria-disabled="true">
+        <span class="asset-list-text">
+          <span class="asset-name">${escapeHtml(asset.assetName)}</span>
+          <span class="asset-meta">Not yet synced</span>
+        </span>
+        <span class="repair-tag">⏳ Syncing…</span>
+      </span>
+    `;
+    listEl.appendChild(item);
+
+    const row = document.createElement('tr');
+    row.className = 'asset-table-row';
+    row.innerHTML = `
+      <td>—</td>
+      <td>${escapeHtml(asset.assetName)}</td>
+      <td class="asset-table-description">${escapeHtml(asset.description)}</td>
+      <td><span class="repair-tag">⏳ Syncing…</span></td>
+      <td>—</td>
+    `;
+    tableBodyEl.appendChild(row);
+  }
+
   async function loadAssets(searchTerm, sortKey) {
     listEl.innerHTML = '<li class="asset-list-status">Loading…</li>';
     tableBodyEl.innerHTML = '<tr><td colspan="5">Loading…</td></tr>';
     errorEl.hidden = true;
+    errorEl.classList.remove('form-notice');
 
     const sort = SORT_OPTIONS[sortKey];
     let query = supabase
@@ -101,21 +151,54 @@ export function renderRegister(container, { navigate }) {
       query = query.or(`asset_name.ilike.%${searchTerm}%,description.ilike.%${searchTerm}%`);
     }
 
-    const [{ data, error }, repairsResult] = await Promise.all([
-      query,
+    // Fetched unconditionally (cheap, local-only, no network) so a
+    // just-saved asset doesn't just disappear until it syncs - both
+    // while genuinely offline (see below) and in the brief online window
+    // between queuing and sync.js actually uploading it.
+    const [{ data, error }, repairsResult, queuedAssets] = await Promise.all([
+      withTimeout(query, { data: null, error: new Error('Request timed out.') }),
       // A plain query rather than embedding assets->asset_repairs via
       // PostgREST's relationship syntax — that relies on its schema
       // cache recognizing the foreign key, which proved unreliable.
       // Fetches every repair (not just outstanding ones) since the
       // delete-confirmation message needs a total count per asset too.
-      supabase.from('asset_repairs').select('asset_id, completed_at'),
+      withTimeout(supabase.from('asset_repairs').select('asset_id, completed_at'), { data: [] }),
+      getUnsyncedAssets(),
     ]);
 
     if (error) {
+      // Offline (or otherwise unreachable) - show whatever's queued on
+      // this device rather than nothing but an error banner. Necessarily
+      // partial: only this device's own not-yet-synced assets, no repair
+      // data (that's a live-only query too), no server-side sort.
+      const pending = queuedAssets.filter((asset) =>
+        matchesSearch(asset.assetName, asset.description, searchTerm)
+      );
+      if (!pending.length) {
+        listEl.innerHTML = '';
+        tableBodyEl.innerHTML = '';
+        errorEl.hidden = false;
+        errorEl.textContent = error.message || 'Could not load assets.';
+        return;
+      }
+
+      // Real information, not a failure - the save genuinely worked and
+      // is sitting safely queued, so this reads as a notice, not an
+      // error (same softened treatment login.js uses for its own
+      // non-error alert).
+      errorEl.hidden = false;
+      errorEl.classList.add('form-notice');
+      errorEl.textContent =
+        "Showing assets saved on this device only — reconnect to see the full register.";
       listEl.innerHTML = '';
       tableBodyEl.innerHTML = '';
-      errorEl.hidden = false;
-      errorEl.textContent = error.message || 'Could not load assets.';
+      // Newest first - the same default sort a fresh register load uses,
+      // since there's no server-side ordering to fall back on here.
+      for (const asset of [...pending].sort((a, b) =>
+        b.recordedAt.localeCompare(a.recordedAt)
+      )) {
+        appendPendingItem(asset);
+      }
       return;
     }
 
@@ -135,7 +218,18 @@ export function renderRegister(container, { navigate }) {
       ? data.filter((asset) => (outstandingCounts.get(asset.id) ?? 0) > 0)
       : data;
 
-    if (!displayData.length) {
+    // Anything still queued that the live query doesn't know about yet -
+    // a brief window right after saving, before sync.js's upload
+    // finishes. A repairs-only sort never includes these: a
+    // just-created asset has no repairs yet by definition.
+    const syncedIds = new Set(data.map((asset) => asset.id));
+    const pendingOnly = sort.repairsOnly
+      ? []
+      : queuedAssets
+          .filter((asset) => !syncedIds.has(asset.id))
+          .filter((asset) => matchesSearch(asset.assetName, asset.description, searchTerm));
+
+    if (!displayData.length && !pendingOnly.length) {
       const emptyMessage = sort.repairsOnly ? 'No assets with repairs found.' : 'No assets found.';
       listEl.innerHTML = `<li class="asset-list-status">${emptyMessage}</li>`;
       tableBodyEl.innerHTML = `<tr><td colspan="5">${emptyMessage}</td></tr>`;
@@ -144,6 +238,9 @@ export function renderRegister(container, { navigate }) {
 
     listEl.innerHTML = '';
     tableBodyEl.innerHTML = '';
+    for (const asset of pendingOnly) {
+      appendPendingItem(asset);
+    }
     for (const asset of displayData) {
       const outstandingCount = outstandingCounts.get(asset.id) ?? 0;
       const totalCount = totalCounts.get(asset.id) ?? 0;
@@ -247,4 +344,16 @@ function escapeHtml(value) {
   const div = document.createElement('div');
   div.textContent = value ?? '';
   return div.innerHTML;
+}
+
+// A queued asset never went through the server-side ilike search the
+// live query uses, so it needs an equivalent client-side check to stay
+// in or out of the list consistently with whatever's currently typed.
+function matchesSearch(name, description, searchTerm) {
+  if (!searchTerm) return true;
+  const needle = searchTerm.toLowerCase();
+  return (
+    (name || '').toLowerCase().includes(needle) ||
+    (description || '').toLowerCase().includes(needle)
+  );
 }
