@@ -26,7 +26,7 @@ Bug fixes and UI changes that don't alter any of the above don't need an update.
 - **Hosting**: GitHub Pages. Every merge to `main` builds and deploys automatically — see "Git workflow & CI/CD".
 
 ## User flow
-1. **Login** — email/password (see "Authentication"). A brand-new signup also collects first/last name.
+1. **Login** — email/password (see "Authentication"). A brand-new signup also collects first/last name. **Forgot password?** leads to a self-service reset (see "Password reset").
 2. **Name prompt, if needed** — an account that reaches this point with no name on file (a pre-existing account, or a future non-form sign-in path) is blocked here until it provides one. See "Routing and auth/profile gates".
 3. **Assets** (`#/register`) — the landing screen after login. Search/browse/sort the register, or start a new asset.
 4. **New asset** (`#/capture`) — photo + details, with any repairs already known about it.
@@ -59,6 +59,8 @@ Built on Windows, running on a Chromebook (ChromeOS/Chrome) in the field. Being 
 │   ├── assets/              Logo + font, imported from JS/CSS (not referenced from public/) so Vite base-prefixes them correctly under GitHub Pages' subpath
 │   ├── views/
 │   │   ├── login.js           Login, and signup (first name, last name, email, password, in that order)
+│   │   ├── forgotPassword.js  Request a password reset email
+│   │   ├── resetPassword.js   Set a new password from the emailed recovery link
 │   │   ├── completeProfile.js Blocking post-login name prompt for an account with no name on file
 │   │   ├── register.js        Search/browse/sort the asset register; delete an asset
 │   │   ├── capture.js         New asset form + photo capture
@@ -84,21 +86,22 @@ There's no component framework, so every view follows the same shape: a function
 
 `confirmDialog({ message })` is the one shared UI primitive outside this pattern: it builds its own backdrop/modal, appends it to `document.body` directly (not into a view's `container`), and returns a Promise that resolves `true` on confirm or `false` on cancel/backdrop-click/Escape. Views awaiting it don't need to render or tear down anything themselves.
 
-`validation.js` holds every form's validation as a pure function (`validateAssetForm`, `validateRepairForm`, `validateNameForm`) — no DOM, no Supabase — so it can be unit tested directly and reused wherever the same rules apply twice (`validateNameForm` is shared between the signup form and the post-login name prompt, which is exactly why it lives here instead of inline in either view).
+`validation.js` holds every form's validation as a pure function (`validateAssetForm`, `validateRepairForm`, `validateNameForm`, `validatePassword`, `validatePasswordResetForm`) — no DOM, no Supabase — so it can be unit tested directly and reused wherever the same rules apply twice. `validateNameForm` is shared between the signup form and the post-login name prompt; `validatePassword` is shared between signup and the password-reset screen, for the same reason — the reset screen must never accept a password signup would have rejected.
 
 ## Routing and auth/profile gates
 `main.js` has no router library: it matches `window.location.hash` against a small ordered list of `{ pattern (RegExp), view }` entries and calls the matching view function. `navigate(hash)` either re-runs the current route directly (if the hash isn't changing, so a click back to the current screen still refreshes it) or sets `window.location.hash`, which fires the `hashchange` listener that calls `route()`.
 
 Before any route renders, `route()` runs through gates in this order:
-1. **No session, and the hash isn't `#/login`** → redirect to `#/login`.
+1. **No session, and the hash isn't in `PUBLIC_HASHES`** (`#/login`, `#/forgot-password`, `#/reset-password`) → redirect to `#/login`.
 2. **Session exists, and the hash is `#/login`** → redirect to `#/register` (the default landing screen).
 3. **Stale `#/home` bookmarks/history** → redirected to `#/register`; the Home screen doesn't exist.
-4. **Session exists, the hash isn't `#/complete-profile`, and the account's profile is incomplete** (`isProfileComplete()` in `auth.js`) → redirect to `#/complete-profile`, blocking every other route until it's satisfied.
+4. **Session exists, the hash isn't `#/complete-profile` or `#/reset-password`, and the account's profile is incomplete** (`isProfileComplete()` in `auth.js`) → redirect to `#/complete-profile`, blocking every other route until it's satisfied.
 5. **Session exists, the hash *is* `#/complete-profile`, but the profile is already complete** → redirect to `#/register` (covers a stale bookmark or the back button after already completing it).
 
 Gate 4 is the one most likely to trip up a future change, so a few things worth knowing about it:
 - The completeness check is **cached per session** (`profileCompleteCache` in `auth.js`), not re-queried on every hash change. The cache resets whenever the session changes (`onAuthChange`), and is set directly to "complete" the moment `completeProfile.js` successfully calls `submitProfileName()` (`markProfileComplete()`), rather than waiting on a fresh query that would just re-confirm what the view already knows.
 - It **deliberately fails open**: if the profile query itself errors — a network blip, or this migration not yet having been applied — `isProfileComplete()` returns `true` rather than blocking the whole app. This is an onboarding nicety, not access control, and the app's whole premise is field reliability; a broken query here should never be the thing that locks a field worker out of logging an asset.
+- `#/reset-password` is exempt from gate 4 for a sharper reason than convenience: **clicking a password recovery link establishes a session** (see "Password reset"). Without this exemption, an account with no name on file would get that fresh recovery session hijacked straight to `#/complete-profile` before ever reaching the password form — the reset would silently fail to do the one thing the user clicked the link for.
 
 ## Data model (Supabase / Postgres)
 `schema.sql` is the full current schema and the thing to read for exact column lists — this section covers the shape and the reasoning, not a column-by-column copy that will only go stale again.
@@ -130,6 +133,24 @@ Email/password via Supabase Auth (`supabase.auth.signUp` / `signInWithPassword`,
 - First/last name travel into `signUp()`'s `options.data`, landing in `auth.users.raw_user_meta_data` — not written directly to `profiles`, because there's no session yet to satisfy RLS at that point. The `handle_new_user()` trigger (see "Data model") is what actually creates the `profiles` row from that metadata.
 - An account that reaches the app with no name on file — a pre-existing account from before this existed, or (see below) a future non-form sign-in path — is blocked by the routing gate and shown `completeProfile.js` before it can go any further. That view reuses the same `validateNameForm` and calls `submitProfileName()`.
 
+### Password reset
+Self-service, via `supabase.auth.resetPasswordForEmail()` → an emailed link → `supabase.auth.updateUser({ password })`. No custom token handling — the entire mechanism is Supabase's.
+
+The one real complexity is that **this app routes on `window.location.hash`, and Supabase's default implicit auth flow returns its tokens in the URL fragment** — which collides directly with the hash router (the emailed link would arrive as `#access_token=...&type=recovery` where the router expects `#/reset-password`). Supabase's own docs call out hash-based routers as unsupported for exactly this reason. The fix is `supabase.js`'s `flowType: 'pkce'`: PKCE returns the auth code as a **query parameter** instead, so a `redirectTo` of `.../#/reset-password` comes back as `.../?code=xxx#/reset-password`, leaving the hash route intact. With `detectSessionInUrl` at its default, the client exchanges the code for a session automatically on load — no app code has to touch the code/token itself.
+
+**`flowType` is client-wide** — it governs every auth flow, not just password reset, including the signup confirmation email. Re-test signup end-to-end after touching it, not just the reset path.
+
+- `forgotPassword.js` (`#/forgot-password`) — a single email field. Calls `requestPasswordReset()` (`auth.js`), which sets `redirectTo` to `${window.location.origin}${import.meta.env.BASE_URL}#/reset-password`. Shows the **same neutral confirmation regardless of whether the address has an account** ("If that email has an account, a reset link is on its way.") — Supabase's API itself doesn't reveal account existence, and the UI must not undo that by branching on it.
+- `resetPassword.js` (`#/reset-password`) — new password + confirm password, validated by the shared `validatePasswordResetForm`, then `updatePassword()` (`auth.js`). On success the user already has a valid session, so it navigates straight to `#/register` like a normal login.
+- **Expired/already-used link**: the recovery code is short-lived and single-use, so this is a normal thing that will happen, not an edge case to skip. `resetPassword.js` checks for a session on load (see the routing note above) — no session means the code exchange never succeeded, so it shows a plain-English "this link has expired" message with a link back to `#/forgot-password`, rather than a raw Supabase error or a bounce to `#/login`.
+- **Offline**: a password reset needs a live round trip — there's no meaningful "sync later" for it, and it deliberately does **not** go through the `db.js` offline queue. Both views check `navigator.onLine` at submit time and say so plainly ("You need to be online to reset your password.") rather than appearing to succeed or failing with a generic network error.
+
+**Supabase dashboard configuration (outside the codebase, one-time)** — the flow fails with a redirect error that looks like a code bug if this isn't done:
+- Add the production redirect URL (`https://benobrett.github.io/asset-register/#/reset-password`) to **Authentication → URL Configuration → Redirect URLs**, plus a localhost equivalent for local development.
+- Confirm the **Site URL** is correct for the GitHub Pages subpath.
+- Check the password recovery email template renders sensibly.
+- The built-in email service is rate-limited and meant for testing (a handful of messages per hour) — likely fine for a small team, but the first thing to check if resets ever fail silently in real use. Custom SMTP is the fix, and is out of scope for this feature.
+
 **Future: Google sign-in.** Still on the roadmap, not yet implemented — there's no `signInWithOAuth` call anywhere in the codebase today. When it's added, the `profiles` trigger already covers it with no changes needed: an OAuth sign-in creates an `auth.users` row with no `first_name`/`last_name` metadata, so it lands with a null-named `profiles` row and goes through the same post-login prompt as a legacy account. What's left is only the provider swap (`supabase.auth.signInWithOAuth({ provider: 'google' })`) and a one-time setup step outside the codebase: enabling the Google provider in the Supabase dashboard and registering OAuth credentials in Google Cloud Console. If this is ever restricted to one organization's staff, Google's `hd` parameter can lock sign-in to a specific Workspace domain.
 
 ## Offline strategy
@@ -141,6 +162,8 @@ Email/password via Supabase Auth (`supabase.auth.signUp` / `signInWithPassword`,
 6. IndexedDB stores Blobs directly, so the photo itself — not just its metadata — survives offline until it syncs.
 7. Per-record sync failures are caught and left queued rather than thrown — a dropped connection mid-sync is an expected condition here, not a bug. `vite-plugin-pwa` separately caches the app shell (HTML/CSS/JS) so the app loads at all with no connection.
 8. **Known limitation:** if the same asset is edited offline in one session while also edited online elsewhere before the first sync completes, whichever sync lands last wins silently — there's no conflict detection. Not a practical risk with a single user; worth addressing (e.g. comparing `updated_at` before overwriting, or flagging the conflict for manual review) if this becomes genuinely multi-user.
+
+Not everything goes through this queue: password reset (see "Password reset") needs a live round trip and is deliberately excluded — there's no meaningful way to queue "email a recovery link" for later.
 
 ## Camera capture
 Using `<input type="file" accept="image/*" capture="environment">` rather than a hand-built `getUserMedia()` live preview:
@@ -155,9 +178,9 @@ Using `<input type="file" accept="image/*" capture="environment">` rather than a
 
 ## Testing conventions
 - Vitest for unit tests, in `tests/` — one file per `src` module under test (`auth.test.js`, `db.test.js`, `format.test.js`, `sync.test.js`, `validation.test.js`).
-- Test pure logic: form validation (`validation.js`), the offline queue and its sync (`db.js`/`sync.js`, mocking the Supabase client), the profile-completeness cache and its fail-open behavior (`auth.js`). Don't unit test camera hardware, real network calls, or the OAuth redirect itself.
+- Test pure logic: form validation (`validation.js`, including the password rules), the offline queue and its sync (`db.js`/`sync.js`, mocking the Supabase client), the profile-completeness cache and its fail-open behavior (`auth.js`). Don't unit test camera hardware, real network calls, the OAuth redirect, or the password-reset email/redirect round trip — verify those manually instead.
 - IndexedDB isn't available outside a browser — `fake-indexeddb` is already in use to test `db.js`/`sync.js` under Vitest.
-- No view (`src/views/*`) is currently unit tested — they're exercised manually in the browser instead, consistent with the "don't unit test the DOM/hardware/network" rule above extending to UI wiring in general.
+- No view (`src/views/*`) is currently unit tested — they're exercised manually in the browser instead, consistent with the "don't unit test the DOM/hardware/network" rule above extending to UI wiring in general. `main.js`'s routing gates fall under the same rule: `route()` reads `window.location.hash` and a live session directly, so it isn't a pure function to test in isolation without a refactor nobody's asked for.
 - Run `npm test` and `npm run lint` before opening a PR.
 
 ## Git workflow & CI/CD

@@ -1,5 +1,5 @@
 import { signIn, signUp } from '../auth.js';
-import { validateNameForm } from '../validation.js';
+import { validateNameForm, validatePassword } from '../validation.js';
 // Imported (not a public/ absolute path) so Vite resolves and base-prefixes
 // it correctly when the app is deployed under a subpath, e.g. GitHub Pages'
 // /asset-register/ — a plain "/logo.png" string is left untouched by Vite
@@ -50,16 +50,20 @@ export function renderLogin(container, { navigate }) {
               mode === 'login' ? 'current-password' : 'new-password'
             }" minlength="6" required />
           </label>
+          <p class="field-error" data-error-for="password" hidden></p>
           <p class="form-error" id="auth-error" role="alert" hidden></p>
           <button type="submit">${mode === 'login' ? 'Log in' : 'Sign up'}</button>
         </form>
-        <button type="button" class="link-button" id="mode-toggle">
+        <div class="login-links">
+          <button type="button" class="link-button" id="mode-toggle">
+            ${mode === 'login' ? 'Sign up' : 'Already have an account? Log in'}
+          </button>
           ${
             mode === 'login'
-              ? "Need an account? Sign up"
-              : 'Already have an account? Log in'
+              ? '<button type="button" class="link-button" id="forgot-password-link">Forgot password?</button>'
+              : ''
           }
-        </button>
+        </div>
       </section>
     `;
 
@@ -67,6 +71,11 @@ export function renderLogin(container, { navigate }) {
       mode = mode === 'login' ? 'signup' : 'login';
       draw();
     });
+
+    const forgotPasswordLink = container.querySelector('#forgot-password-link');
+    if (forgotPasswordLink) {
+      forgotPasswordLink.addEventListener('click', () => navigate('#/forgot-password'));
+    }
 
     function showFieldErrors(errors) {
       for (const el of container.querySelectorAll('.field-error')) {
@@ -94,8 +103,10 @@ export function renderLogin(container, { navigate }) {
         const firstName = form.firstName.value;
         const lastName = form.lastName.value;
         const { valid, errors } = validateNameForm({ firstName, lastName });
+        const passwordError = validatePassword(password);
+        if (passwordError) errors.password = passwordError;
         showFieldErrors(errors);
-        if (!valid) return;
+        if (!valid || passwordError) return;
       }
 
       const submitButton = form.querySelector('button[type="submit"]');

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { validateAssetForm, validateRepairForm, validateNameForm } from '../src/validation.js';
+import {
+  validateAssetForm,
+  validateRepairForm,
+  validateNameForm,
+  validatePassword,
+  validatePasswordResetForm,
+} from '../src/validation.js';
 
 describe('validateAssetForm', () => {
   it('passes with an asset name, description, and date/time', () => {
@@ -113,5 +119,52 @@ describe('validateNameForm', () => {
   it('trims surrounding whitespace before checking length', () => {
     const result = validateNameForm({ firstName: '  Jane  ', lastName: '  Smith  ' });
     expect(result.valid).toBe(true);
+  });
+});
+
+describe('validatePassword', () => {
+  it('accepts a password of 6 or more characters', () => {
+    expect(validatePassword('abc123')).toBeNull();
+  });
+
+  it('rejects a password under 6 characters', () => {
+    expect(validatePassword('abc12')).toBeDefined();
+  });
+
+  it('rejects an empty password', () => {
+    expect(validatePassword('')).toBeDefined();
+  });
+});
+
+describe('validatePasswordResetForm', () => {
+  it('passes when the password is valid and both fields match', () => {
+    const result = validatePasswordResetForm({
+      password: 'abc123',
+      confirmPassword: 'abc123',
+    });
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual({});
+  });
+
+  it('rejects a password under 6 characters', () => {
+    const result = validatePasswordResetForm({ password: 'abc', confirmPassword: 'abc' });
+    expect(result.valid).toBe(false);
+    expect(result.errors.password).toBeDefined();
+  });
+
+  it('rejects mismatched passwords', () => {
+    const result = validatePasswordResetForm({
+      password: 'abc123',
+      confirmPassword: 'abc124',
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors.confirmPassword).toBeDefined();
+  });
+
+  it('reports only the password error when both are invalid', () => {
+    const result = validatePasswordResetForm({ password: 'abc', confirmPassword: 'xyz' });
+    expect(result.valid).toBe(false);
+    expect(result.errors.password).toBeDefined();
+    expect(result.errors.confirmPassword).toBeUndefined();
   });
 });
