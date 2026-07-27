@@ -487,6 +487,15 @@ button[type='submit']:active {
   font-weight: 400;
 }
 
+/* A queued-but-not-yet-synced asset - a <span>, not a <button> (nothing
+   to navigate to yet), so it needs the padding the generic button rule
+   would otherwise supply, plus a visual cue that it isn't interactive. */
+.asset-list-button.is-pending {
+  padding: 0.55rem 0.9rem;
+  opacity: 0.75;
+  cursor: default;
+}
+
 .asset-list-button:hover {
   border-color: var(--color-border-strong);
   box-shadow: var(--shadow-md);
