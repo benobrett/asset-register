@@ -6,7 +6,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20 }
+        with: { node-version: 22 }
       - run: npm ci
       - run: npm run lint
       - run: npm test
@@ -15,8 +15,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # 22, not 20 like other workflows here - e2e/supabase-helper.js
+      # creates a plain Node-side Supabase client (for server-side
+      # assertions/cleanup, not just the browser-side one the app itself
+      # uses), and its realtime dependency needs a native WebSocket, which
+      # only Node 22+ provides. The `test` job doesn't strictly need this,
+      # but is kept in step for one Node version per workflow file.
       - uses: actions/setup-node@v4
-        with: { node-version: 20 }
+        with: { node-version: 22 }
       - run: npm ci
       - name: Cache Playwright browsers
         id: playwright-cache

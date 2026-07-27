@@ -221,7 +221,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20 }
+        with: { node-version: 22 }
       - run: npm ci
       - run: npm run lint
       - run: npm test
@@ -230,8 +230,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # 22, not 20 - e2e/supabase-helper.js's Node-side Supabase client
+      # needs a native WebSocket (its realtime dependency), which only
+      # Node 22+ provides. Kept the same across both jobs in this file
+      # rather than mixing versions.
       - uses: actions/setup-node@v4
-        with: { node-version: 20 }
+        with: { node-version: 22 }
       - run: npm ci
       - name: Cache Playwright browsers
         id: playwright-cache
