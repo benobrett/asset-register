@@ -85,6 +85,12 @@ create table repair_comments (
   repair_id uuid references asset_repairs(id) on delete cascade not null,
   comment text not null,
   created_by_email text not null,
+  -- Snapshotted at comment-creation time from the author's own profile,
+  -- same reasoning as created_by_email: there's no client-side RLS access
+  -- to look up *another* user's name later, so the display name has to be
+  -- captured once, at the moment it's known. Null for an account with no
+  -- name on file yet - the UI falls back to created_by_email in that case.
+  created_by_name text,
   created_at timestamptz not null default now()
 );
 

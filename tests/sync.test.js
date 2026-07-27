@@ -234,6 +234,7 @@ describe('syncQueuedRepairComments', () => {
         repairId: 'r1',
         comment: 'Replaced the armrest bolt.',
         createdByEmail: 'sam@example.com',
+        createdByName: 'Sam Smith',
       },
     ]);
 
@@ -244,9 +245,31 @@ describe('syncQueuedRepairComments', () => {
       repair_id: 'r1',
       comment: 'Replaced the armrest bolt.',
       created_by_email: 'sam@example.com',
+      created_by_name: 'Sam Smith',
     });
     expect(markRepairCommentSyncedMock).toHaveBeenCalledWith('c1');
     expect(result).toEqual({ succeeded: ['c1'], failed: [] });
+  });
+
+  it('defaults created_by_name to null when the account has no name on file', async () => {
+    getUnsyncedRepairCommentsMock.mockResolvedValue([
+      {
+        id: 'c3',
+        repairId: 'r1',
+        comment: 'Ordered a replacement part.',
+        createdByEmail: 'sam@example.com',
+      },
+    ]);
+
+    await syncQueuedRepairComments();
+
+    expect(tableUpsert).toHaveBeenCalledWith({
+      id: 'c3',
+      repair_id: 'r1',
+      comment: 'Ordered a replacement part.',
+      created_by_email: 'sam@example.com',
+      created_by_name: null,
+    });
   });
 
   it('leaves a comment queued and reports the failure when the upsert fails', async () => {

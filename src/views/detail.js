@@ -1,5 +1,5 @@
 import { supabase, getPhotoUrl } from '../supabase.js';
-import { getSession } from '../auth.js';
+import { getSession, getProfile } from '../auth.js';
 import { validateAssetForm, validateRepairForm } from '../validation.js';
 import { queueAsset, queueRepair, queueRepairComment } from '../db.js';
 import { syncAll } from '../sync.js';
@@ -53,6 +53,12 @@ function escapeHtml(value) {
   return div.innerHTML;
 }
 
+// Falls back to the email address for a comment left before its author
+// had a name on file (or whose account still doesn't have one).
+function getCommentAuthor(comment) {
+  return comment.created_by_name || comment.created_by_email;
+}
+
 // Comments show date only, no time — e.g. "26 July 26".
 function formatCommentDate(isoString) {
   const date = new Date(isoString);
@@ -74,7 +80,7 @@ export async function renderDetail(container, { navigate, params }) {
   `;
   container.querySelector('#back').addEventListener('click', () => navigate('#/register'));
 
-  const [assetResult, repairsResult] = await Promise.all([
+  const [assetResult, repairsResult, currentUserProfile] = await Promise.all([
     supabase
       .from('assets')
       .select('id, asset_number, asset_name, description, recorded_at, photo_path')
@@ -87,7 +93,18 @@ export async function renderDetail(container, { navigate, params }) {
       )
       .eq('asset_id', params.id)
       .order('reported_at', { ascending: false }),
+    // Needed to stamp any comment added in this session with a display
+    // name - fetched once up front rather than per-comment.
+    getProfile().catch(() => null),
   ]);
+
+  // Falls back to null (not the email) here - the email fallback only
+  // applies once a comment is actually being rendered, where the specific
+  // comment's own created_by_email is what's available to fall back to.
+  const currentUserName =
+    currentUserProfile?.first_name && currentUserProfile?.last_name
+      ? `${currentUserProfile.first_name} ${currentUserProfile.last_name}`
+      : null;
 
   const body = container.querySelector('#detail-body');
 
@@ -101,13 +118,13 @@ export async function renderDetail(container, { navigate, params }) {
   let repairsLoadError = repairsResult.error?.message || null;
 
   // Keyed by repair id, each value an array of { comment, created_by_email,
-  // created_at } oldest-first — the panel shows the whole array, the inline
-  // preview shows just its last entry.
+  // created_by_name, created_at } oldest-first — the panel shows the whole
+  // array, the inline preview shows just its last entry.
   const commentsByRepairId = new Map();
   if (repairs.length) {
     const { data: comments, error: commentsError } = await supabase
       .from('repair_comments')
-      .select('id, repair_id, comment, created_by_email, created_at')
+      .select('id, repair_id, comment, created_by_email, created_by_name, created_at')
       .in(
         'repair_id',
         repairs.map((r) => r.id)
@@ -205,7 +222,7 @@ export async function renderDetail(container, { navigate, params }) {
         ? `
       <p class="repair-comment-preview">
         ${escapeHtml(latestComment.comment)}
-        <span class="asset-meta">— ${escapeHtml(latestComment.created_by_email)} · ${formatCommentDate(latestComment.created_at)}</span>
+        <span class="asset-meta">— ${escapeHtml(getCommentAuthor(latestComment))} · ${formatCommentDate(latestComment.created_at)}</span>
       </p>
     `
         : '';
@@ -315,7 +332,7 @@ export async function renderDetail(container, { navigate, params }) {
           <li class="comment-thread-item">
             <p class="comment-text">${escapeHtml(comment.comment)}</p>
             <p class="asset-meta">
-              ${escapeHtml(comment.created_by_email)} · ${formatCommentDate(comment.created_at)}
+              ${escapeHtml(getCommentAuthor(comment))} · ${formatCommentDate(comment.created_at)}
             </p>
           </li>
         `
@@ -727,6 +744,7 @@ export async function renderDetail(container, { navigate, params }) {
               repairId: repair.id,
               comment: completedComment,
               createdByEmail: completedByEmail,
+              createdByName: currentUserName,
               createdAt: completedAt,
             });
           }
@@ -742,6 +760,7 @@ export async function renderDetail(container, { navigate, params }) {
             list.push({
               comment: completedComment,
               created_by_email: completedByEmail,
+              created_by_name: currentUserName,
               created_at: completedAt,
             });
             commentsByRepairId.set(repair.id, list);
@@ -775,6 +794,7 @@ export async function renderDetail(container, { navigate, params }) {
             repairId,
             comment: text,
             createdByEmail,
+            createdByName: currentUserName,
             createdAt,
           });
           if (navigator.onLine) {
@@ -782,7 +802,12 @@ export async function renderDetail(container, { navigate, params }) {
           }
 
           const list = commentsByRepairId.get(repairId) || [];
-          list.push({ comment: text, created_by_email: createdByEmail, created_at: createdAt });
+          list.push({
+            comment: text,
+            created_by_email: createdByEmail,
+            created_by_name: currentUserName,
+            created_at: createdAt,
+          });
           commentsByRepairId.set(repairId, list);
           // Stays expanded — commentRepairId is untouched — and the fresh
           // markup naturally clears the textarea.
