@@ -67,15 +67,21 @@ Built on Windows, running on a Chromebook (ChromeOS/Chrome) in the field. Being 
 │   │   └── detail.js          View/edit an asset; the repair + comment workflow
 │   └── style.css
 ├── tests/                  Vitest specs — one file per src module under test
+├── e2e/                    Playwright specs — one file per user-facing flow, see "Testing conventions"
+│   ├── auth.setup.js         Logs in once, saves storageState for every other spec to reuse
+│   ├── supabase-helper.js    Node-side Supabase client for asserting/cleaning up server-side state
+│   └── fixtures/             Files specs hand to setInputFiles() etc.
 ├── migrations/             Incremental SQL actually run against the live Supabase project, in the order it was run
 ├── schema.sql              Full current schema — see "Data model" for how this relates to migrations/
 ├── .github/
 │   └── workflows/
-│       ├── ci.yml            Lint + test on every PR
+│       ├── ci.yml            Lint + Vitest, and the Playwright e2e suite, on every PR
 │       └── deploy.yml        Build + deploy to GitHub Pages on every push to main
+├── playwright.config.js
 ├── vite.config.js
 ├── .gitattributes
 ├── .env                    Supabase URL + publishable key (gitignored)
+├── .env.e2e                Same, for the separate e2e Supabase project, plus test-account credentials (gitignored)
 ├── package.json
 ├── README.md               Project overview for a human reader (features, setup) — CLAUDE.md covers conventions instead
 └── CLAUDE.md
@@ -176,18 +182,36 @@ Using `<input type="file" accept="image/*" capture="environment">` rather than a
 ## Environment variables
 `.env` (gitignored) holds `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`. Vite exposes these to client code via `import.meta.env`. `.env.example` documents both names with empty values — copy it to `.env` and fill them in.
 
+`.env.e2e` (gitignored) is the same two keys plus `E2E_TEST_EMAIL`/`E2E_TEST_PASSWORD`, pointed at a **separate** Supabase project — see "Testing conventions" for why this can't just reuse `.env`. `.env.e2e.example` documents it the same way.
+
 ## Testing conventions
-- Vitest for unit tests, in `tests/` — one file per `src` module under test (`auth.test.js`, `db.test.js`, `format.test.js`, `sync.test.js`, `validation.test.js`).
-- Test pure logic: form validation (`validation.js`, including the password rules), the offline queue and its sync (`db.js`/`sync.js`, mocking the Supabase client), the profile-completeness cache and its fail-open behavior (`auth.js`). Don't unit test camera hardware, real network calls, the OAuth redirect, or the password-reset email/redirect round trip — verify those manually instead.
+**Vitest** (`tests/`) covers pure logic — validation, formatting, the offline queue. **Playwright** (`e2e/`) covers user-facing flows end to end in a real (Chromium) browser. Any PR that adds or changes a user-facing flow includes or updates an e2e spec; a bug fix to an existing flow should add the spec that would have caught the bug. Pure-logic changes need Vitest only.
+
+### Vitest
+- Unit tests in `tests/` — one file per `src` module under test (`auth.test.js`, `db.test.js`, `format.test.js`, `sync.test.js`, `validation.test.js`).
+- Test pure logic: form validation (`validation.js`), the offline queue and its sync (`db.js`/`sync.js`, mocking the Supabase client), the profile-completeness cache and its fail-open behavior (`auth.js`). Don't unit test camera hardware, real network calls, the OAuth redirect, or the password-reset email/redirect round trip — verify those manually, or cover them in Playwright.
 - IndexedDB isn't available outside a browser — `fake-indexeddb` is already in use to test `db.js`/`sync.js` under Vitest.
-- No view (`src/views/*`) is currently unit tested — they're exercised manually in the browser instead, consistent with the "don't unit test the DOM/hardware/network" rule above extending to UI wiring in general. `main.js`'s routing gates fall under the same rule: `route()` reads `window.location.hash` and a live session directly, so it isn't a pure function to test in isolation without a refactor nobody's asked for.
+- `vite.config.js`'s `test.exclude` keeps Vitest out of `e2e/` — without it, Vitest's default glob also matches Playwright's `*.spec.js` files and fails trying to run them as unit tests.
 - Run `npm test` and `npm run lint` before opening a PR.
+
+### Playwright (e2e)
+- Specs live in `e2e/`, one flow per file, named after the flow. Run with `npm run test:e2e` (`npm run test:e2e:ui` for the debugging UI).
+- **Runs against the production bundle**, not the dev server: `playwright.config.js`'s `webServer` runs `npm run build:e2e && npm run preview`. This matters because `vite-plugin-pwa`'s service worker behaves differently in a dev build, and the production bundle is what actually ships.
+- **A separate Supabase project from `.env`**, via `.env.e2e` (`npm run build:e2e` is `vite build --mode e2e`, which loads it). Specs create real assets/repairs/comments, and this app's RLS makes every one of those visible to every logged-in user — pointed at production, a test run would steadily fill the real register with junk that field staff then see. In CI there's no `.env.e2e` file at all; the same variable names are injected directly as job env from repository secrets (`E2E_SUPABASE_URL`, `E2E_SUPABASE_PUBLISHABLE_KEY`, `E2E_TEST_EMAIL`, `E2E_TEST_PASSWORD`), which Vite picks up the same way regardless of mode.
+- **Auth is done once, not per spec**: a `setup` project (`e2e/auth.setup.js`) logs in and saves `storageState` to `e2e/.auth/user.json` (gitignored); the `chromium` project depends on it and reuses that state. `login.spec.js` is the one place that needs to start logged out, so it overrides `storageState` back to empty per-test.
+- **Locate by role, label, and visible text — never CSS classes.** Views here re-render by rewriting their own HTML from scratch (see "View pattern"), so a class-based selector breaks on unrelated refactors that don't change what the user actually sees. This is the main source of flakiness to design against.
+- **No fixed `waitForTimeout` sleeps.** Rely on Playwright's auto-waiting and `expect.poll()` (used to wait for a record to reach Supabase after reconnecting) instead — a fixed sleep in an offline-sync app is either too short and flaky or too long and slow.
+- Each spec either uses a uniquely-named record (a timestamp in the name) so parallel/repeated runs don't collide, or cleans up what it created (usually both) — via a direct, Node-side Supabase client (`e2e/supabase-helper.js`, signed in as the test account) rather than the browser under test, so cleanup doesn't depend on the UI having worked.
+- **Limitations — a passing suite is necessary, not sufficient:**
+  - **The camera itself isn't exercised.** `setInputFiles()` supplies a file directly to the input; it doesn't drive the native camera app or verify `capture="environment"` behavior. Periodic manual checks on the real Chromebook tablet are still required.
+  - **Service worker / app-shell caching isn't faithfully simulated.** Playwright's offline mode blocks network requests at the browser-context level; it isn't the same as a device genuinely losing signal with a warm PWA cache already installed.
+  - **Supabase itself is not under test** — only this app's use of it.
 
 ## Git workflow & CI/CD
 - `main` is protected: no direct pushes, PRs only.
 - Branch protection requires a passing CI check before merge. (A required approving review is worth adding once there's more than one contributor — with a single person, GitHub won't let you approve your own PR, so that specific rule would block every merge until then.)
 - One branch per change: `feature/short-description`, `fix/short-description`, or `docs/short-description`.
-- `.github/workflows/ci.yml` runs on every PR:
+- `.github/workflows/ci.yml` runs on every PR — a `test` job (lint + Vitest) and an `e2e` job (Playwright), in parallel:
 ```yaml
 name: CI
 on: pull_request
@@ -201,7 +225,42 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm test
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm ci
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Install Chromium (with system deps)
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+      - name: Install Chromium's system deps only (cache hit)
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+      - name: Run Playwright e2e suite
+        run: npm run test:e2e
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.E2E_SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.E2E_SUPABASE_PUBLISHABLE_KEY }}
+          E2E_TEST_EMAIL: ${{ secrets.E2E_TEST_EMAIL }}
+          E2E_TEST_PASSWORD: ${{ secrets.E2E_TEST_PASSWORD }}
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
 ```
+The browser binary is cached by `package-lock.json`'s hash (bumps whenever `@playwright/test`'s version changes); a cache hit still needs `install-deps` since the cached path doesn't include the OS-level packages Chromium needs, but skips the ~100MB+ browser download. Retries (`playwright.config.js`: 2 on CI, 0 locally) and the failure-only report upload are what make a CI-only flake debuggable without blocking every merge on it.
 - `.github/workflows/deploy.yml` builds and deploys to GitHub Pages on every push to `main` (plus a manual `workflow_dispatch` trigger), reading the Supabase env vars from repo secrets of the same name:
 ```yaml
 name: Deploy to GitHub Pages
@@ -233,7 +292,10 @@ jobs:
 ## Commands
 - `npm run dev` — Vite dev server
 - `npm run build` — production build (also used by the deploy workflow)
+- `npm run build:e2e` — production build against `.env.e2e` instead (`vite build --mode e2e`) — what the e2e suite actually runs against
 - `npm run preview` — serve the production build locally
 - `npm test` — run Vitest once
 - `npm run test:watch` — Vitest watch mode
+- `npm run test:e2e` — run the Playwright suite (builds + previews first, per `playwright.config.js`'s `webServer`)
+- `npm run test:e2e:ui` — same, with Playwright's debugging UI
 - `npm run lint` — ESLint
