@@ -1,4 +1,5 @@
 import { signIn, signUp } from '../auth.js';
+import { validateNameForm } from '../validation.js';
 // Imported (not a public/ absolute path) so Vite resolves and base-prefixes
 // it correctly when the app is deployed under a subpath, e.g. GitHub Pages'
 // /asset-register/ — a plain "/logo.png" string is left untouched by Vite
@@ -23,6 +24,22 @@ export function renderLogin(container, { navigate }) {
           register up to date in the field — even without a signal.
         </p>
         <form id="auth-form" novalidate>
+          ${
+            mode === 'signup'
+              ? `
+          <label>
+            First name
+            <input type="text" name="firstName" autocomplete="given-name" required />
+          </label>
+          <p class="field-error" data-error-for="firstName" hidden></p>
+          <label>
+            Last name
+            <input type="text" name="lastName" autocomplete="family-name" required />
+          </label>
+          <p class="field-error" data-error-for="lastName" hidden></p>
+          `
+              : ''
+          }
           <label>
             Email
             <input type="email" name="email" autocomplete="email" required />
@@ -51,6 +68,20 @@ export function renderLogin(container, { navigate }) {
       draw();
     });
 
+    function showFieldErrors(errors) {
+      for (const el of container.querySelectorAll('.field-error')) {
+        el.hidden = true;
+        el.textContent = '';
+      }
+      for (const [field, message] of Object.entries(errors)) {
+        const el = container.querySelector(`[data-error-for="${field}"]`);
+        if (el) {
+          el.hidden = false;
+          el.textContent = message;
+        }
+      }
+    }
+
     container.querySelector('#auth-form').addEventListener('submit', async (event) => {
       event.preventDefault();
       const form = event.target;
@@ -59,6 +90,14 @@ export function renderLogin(container, { navigate }) {
       const errorEl = container.querySelector('#auth-error');
       errorEl.hidden = true;
 
+      if (mode === 'signup') {
+        const firstName = form.firstName.value;
+        const lastName = form.lastName.value;
+        const { valid, errors } = validateNameForm({ firstName, lastName });
+        showFieldErrors(errors);
+        if (!valid) return;
+      }
+
       const submitButton = form.querySelector('button[type="submit"]');
       submitButton.disabled = true;
       try {
@@ -66,7 +105,7 @@ export function renderLogin(container, { navigate }) {
           await signIn(email, password);
           navigate('#/register');
         } else {
-          await signUp(email, password);
+          await signUp(email, password, form.firstName.value.trim(), form.lastName.value.trim());
           errorEl.hidden = false;
           errorEl.textContent = 'Account created — check your email to confirm, then log in.';
           errorEl.classList.add('form-notice');
