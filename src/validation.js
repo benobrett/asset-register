@@ -29,3 +29,36 @@ export function validateRepairForm({ description }) {
 
   return { valid: Object.keys(errors).length === 0, errors };
 }
+
+// Unicode-aware (\p{L}) so accented/non-Latin letters pass (e.g. "Ngā",
+// "Müller"), alongside spaces, hyphens, and apostrophes (e.g. "O'Brien").
+// Digits and other punctuation are rejected. Shared by the signup form
+// and the post-login name-completion prompt — one validator, not two.
+const NAME_PATTERN = /^[\p{L}\s'-]+$/u;
+
+function validateNameField(value, label) {
+  const trimmed = (value || '').trim();
+
+  if (!trimmed) {
+    return `${label} is required.`;
+  }
+  if (trimmed.length > 50) {
+    return `${label} must be 50 characters or fewer.`;
+  }
+  if (!NAME_PATTERN.test(trimmed)) {
+    return `${label} can only contain letters, spaces, hyphens, and apostrophes.`;
+  }
+  return null;
+}
+
+export function validateNameForm({ firstName, lastName }) {
+  const errors = {};
+
+  const firstNameError = validateNameField(firstName, 'First name');
+  if (firstNameError) errors.firstName = firstNameError;
+
+  const lastNameError = validateNameField(lastName, 'Last name');
+  if (lastNameError) errors.lastName = lastNameError;
+
+  return { valid: Object.keys(errors).length === 0, errors };
+}

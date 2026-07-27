@@ -117,3 +117,76 @@ create policy "Logged-in users can manage all repair comments"
   on repair_comments for all
   using (auth.uid() is not null)
   with check (auth.uid() is not null);
+
+-- One row per auth.users account, added lazily rather than backfilled.
+-- Nullable by design: mandatory-ness for new signups is enforced at the
+-- application layer (the signup form and the post-login prompt), not
+-- here - a null name is the marker for "hasn't provided one yet", not an
+-- error state. The CHECK constraints are the "never trust the client
+-- alone" half: they only fire on a *non-null* value, so they can't be
+-- used to force a name in, only to reject a malformed one.
+create table profiles (
+  id uuid primary key references auth.users(id) on delete cascade,
+  first_name text,
+  last_name text,
+  -- chr(39) (a plain apostrophe) is concatenated in rather than embedded
+  -- as a literal quote character in the pattern string - both '' quote-
+  -- doubling and $tag$ dollar-quoting turned out to be easy things for
+  -- copy/paste (or markdown/math rendering) to mangle into a syntax
+  -- error, as did wrapping these across multiple lines - so each
+  -- constraint is kept to one single, unbroken line.
+  check (first_name is null or (first_name = btrim(first_name) and length(first_name) between 1 and 50 and first_name ~ ('^[[:alpha:][:space:]' || chr(39) || '-]+$'))),
+  check (last_name is null or (last_name = btrim(last_name) and length(last_name) between 1 and 50 and last_name ~ ('^[[:alpha:][:space:]' || chr(39) || '-]+$')))
+);
+
+-- Populates a profiles row for every new account the moment it's created
+-- - before email confirmation, before any login, so no authenticated
+-- session/RLS check is available yet at that point. Covers both signup
+-- paths: email/password (first_name/last_name arrive via signUp()'s
+-- `options.data`, landing in raw_user_meta_data) and Google OAuth (no
+-- such metadata, so the row is created with null names - which is
+-- exactly what puts that account through the same post-login prompt as
+-- a pre-existing legacy user). SECURITY DEFINER is what lets this insert
+-- bypass RLS, since it runs as the trigger's owner, not the new user.
+create or replace function handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.profiles (id, first_name, last_name)
+  values (
+    new.id,
+    new.raw_user_meta_data ->> 'first_name',
+    new.raw_user_meta_data ->> 'last_name'
+  );
+  return new;
+end;
+$$;
+
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row
+  execute function handle_new_user();
+
+alter table profiles enable row level security;
+
+create policy "Users can view their own profile"
+  on profiles for select
+  using (auth.uid() = id);
+
+create policy "Users can insert their own profile"
+  on profiles for insert
+  with check (auth.uid() = id);
+
+-- Restricted to rows where both names are still null, so this can only
+-- ever fill a name in, never silently overwrite one that's already set.
+create policy "Users can set their own name once"
+  on profiles for update
+  using (auth.uid() = id and first_name is null and last_name is null)
+  with check (auth.uid() = id);
+
+-- Tracks remaining legacy accounts still to be prompted. Progress query:
+--   select count(*) from profiles where first_name is null or last_name is null;
+create index profiles_missing_name_idx on profiles (id) where first_name is null or last_name is null;
