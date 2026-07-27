@@ -674,8 +674,8 @@ button[type='submit']:active {
   align-items: flex-start;
 }
 
-/* Subtle tie-back to whichever repair the open Information/Comment panel
-   belongs to — a colour cue instead of repeating its description as text. */
+/* Subtle tie-back to whichever repair the open Information panel belongs
+   to — a colour cue instead of repeating its description as text. */
 .repair-item-panel-open {
   border-color: var(--color-primary);
 }
@@ -719,6 +719,45 @@ button[type='submit']:active {
   align-items: center;
   gap: 0.25rem;
   margin-top: 0.25rem;
+}
+
+/* Expands the repair item downward in place rather than opening a panel
+   or overlay. grid-template-rows 0fr->1fr is the CSS-only way to animate
+   height for content whose size isn't known up front - the inner wrapper's
+   overflow: hidden is what actually clips it while collapsed/animating. */
+.repair-comment-expand {
+  align-self: stretch;
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.2s ease;
+}
+
+.repair-comment-expand.is-open {
+  grid-template-rows: 1fr;
+}
+
+.repair-comment-expand-inner {
+  overflow: hidden;
+  min-height: 0;
+  padding-top: 0.6rem;
+}
+
+.repair-comment-expand-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.repair-comment-expand-header h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+/* Space out the entry field from its Save/Close row. */
+.repair-comment-expand-inner .edit-actions {
+  margin-top: 0.75rem;
 }
 
 .repair-info-button {
