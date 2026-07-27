@@ -87,6 +87,7 @@ export async function syncQueuedRepairComments() {
         repair_id: comment.repairId,
         comment: comment.comment,
         created_by_email: comment.createdByEmail,
+        created_by_name: comment.createdByName ?? null,
       });
       if (error) throw error;
 
