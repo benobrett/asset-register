@@ -27,6 +27,10 @@ const routes = [
 // that case rather than being bounced to #/login before it can show it.
 const PUBLIC_HASHES = new Set(['#/login', '#/forgot-password', '#/reset-password']);
 
+// The only onAuthChange events worth a full profile-recheck + re-render
+// for - see the listener below for why the others are ignored.
+const AUTH_TRANSITION_EVENTS = new Set(['SIGNED_IN', 'SIGNED_OUT', 'PASSWORD_RECOVERY']);
+
 function navigate(hash) {
   if (window.location.hash === hash) {
     route();
@@ -92,10 +96,25 @@ async function route() {
   app.innerHTML = '<p>Page not found.</p>';
 }
 
-onAuthChange((session) => {
+onAuthChange((session, event) => {
+  // Always kept fresh, regardless of event - harmless, and route() itself
+  // reads this rather than calling getSession() again on every check.
   currentSession = session;
-  // A different account may now be signed in - never reuse the previous
-  // one's cached profile-completeness.
+
+  // Supabase fires this listener for more than just sign-in/sign-out -
+  // INITIAL_SESSION on every single page load (redundant with the
+  // explicit route() call below, which already handles first paint) and
+  // TOKEN_REFRESHED periodically in the background while nothing the
+  // user did actually changed. Resetting the profile cache and doing a
+  // full re-render for those was pure redundant work: 2-3x the queries
+  // and re-renders for a single real sign-in, no user-visible bug, but
+  // enough churn that an e2e spec had to wait for the network to settle
+  // before it could interact reliably. Only a genuine transition
+  // warrants a fresh profile-completeness check - a different account
+  // may now be signed in, so the previous one's cached result can't be
+  // reused.
+  if (!AUTH_TRANSITION_EVENTS.has(event)) return;
+
   resetProfileCache();
   route();
 });

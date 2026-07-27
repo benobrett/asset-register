@@ -64,10 +64,14 @@ export async function getSession() {
   return session;
 }
 
+// Passes the event type through (not just the session) so callers can
+// tell a genuine sign-in/sign-out transition apart from the other things
+// Supabase fires this for - INITIAL_SESSION on every page load, and
+// periodic TOKEN_REFRESHED while a session is just sitting there unused.
 export function onAuthChange(callback) {
   const {
     data: { subscription },
-  } = supabase.auth.onAuthStateChange((_event, session) => callback(session));
+  } = supabase.auth.onAuthStateChange((event, session) => callback(session, event));
   return () => subscription.unsubscribe();
 }
 
