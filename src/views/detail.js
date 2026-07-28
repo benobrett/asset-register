@@ -47,10 +47,16 @@ function toDateTimeLocal(isoString) {
   return date.toISOString().slice(0, 16);
 }
 
+// The textContent → innerHTML round-trip only escapes &, <, > (text-node
+// concerns) - it leaves " and ' untouched, which is unsafe wherever the
+// result is placed inside a quoted attribute (value="...", aria-label="...")
+// rather than as element content. Escaping both here too costs nothing in
+// the plain-text-content call sites and closes that gap everywhere this
+// function is used.
 function escapeHtml(value) {
   const div = document.createElement('div');
   div.textContent = value ?? '';
-  return div.innerHTML;
+  return div.innerHTML.replaceAll('"', '&quot;').replaceAll("'", '&#39;');
 }
 
 // Falls back to the email address for a comment left before its author

@@ -1,7 +1,13 @@
+// The textContent → innerHTML round-trip only escapes &, <, > (text-node
+// concerns) - it leaves " and ' untouched, which is unsafe wherever the
+// result is placed inside a quoted attribute (value="...", aria-label="...")
+// rather than as element content. Escaping both here too costs nothing in
+// the plain-text-content call sites and closes that gap everywhere this
+// function is used.
 function escapeHtml(value) {
   const div = document.createElement('div');
   div.textContent = value ?? '';
-  return div.innerHTML;
+  return div.innerHTML.replaceAll('"', '&quot;').replaceAll("'", '&#39;');
 }
 
 // Promise resolves true on confirm, false on cancel/backdrop-click/Escape —
