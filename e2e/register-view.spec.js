@@ -173,6 +173,14 @@ test('deletes an asset, showing the repair-count confirmation and cascading its 
     // the now-visible button.
     const row = page.locator('.asset-list-item').filter({ hasText: assetName });
     const deleteButton = page.getByRole('button', { name: `Delete ${assetName}` });
+
+    // Wait for the debounced search to have actually rendered its result
+    // before touching anything. Otherwise its 250ms timer can still be
+    // pending, fire mid-delete, and blank the list to "Loading…" - which
+    // makes the post-delete "row is gone" assertion pass for the wrong
+    // reason, before the delete has even completed.
+    await expect(row).toHaveCount(1);
+
     await row.hover();
     await deleteButton.click();
 

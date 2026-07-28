@@ -55,6 +55,13 @@ export async function updatePassword(password) {
 export async function signOut() {
   const { error } = await supabase.auth.signOut();
   if (error) throw error;
+  // Cleared here rather than in resetProfileCache(): that runs on
+  // sign-in too, and Supabase can fire a restore-SIGNED_IN on an ordinary
+  // (possibly offline) reload - clearing there would wipe the persisted
+  // name in exactly the offline case it exists to cover. Sign-out is the
+  // one moment the stored name genuinely stops being this device's to
+  // show.
+  clearStoredProfileName();
 }
 
 export async function getSession() {
@@ -101,6 +108,71 @@ export function needsNamePrompt(profile) {
 // from a previous account can never leak into a new one.
 let profileCompleteCache = null;
 
+// The name behind that same query, kept so the profile menu can render it
+// without a second round trip. Held separately from profileCompleteCache
+// because the two aren't equivalent: the completeness check fails open, so
+// it can be true with no profile data behind it at all.
+let cachedProfile = null;
+
+// localStorage, not db.js's IndexedDB helpers: those are all shaped around
+// the offline *sync queue* (queueX/getUnsyncedX/markXSynced), and a cached
+// display name is not a queued mutation waiting to reach the server - it's
+// a read-through cache. Filing it there would blur a pattern that's
+// currently unambiguous. localStorage is also synchronous, so the popover
+// renders the name on first paint instead of flashing empty.
+const PROFILE_NAME_STORAGE_KEY = 'profileName';
+
+// Keyed by user id so a stored name can never be shown to the wrong
+// account, even if a sign-out ever fails to clear it.
+function readStoredProfileName(userId) {
+  try {
+    const raw = localStorage.getItem(PROFILE_NAME_STORAGE_KEY);
+    if (!raw) return null;
+    const stored = JSON.parse(raw);
+    if (!stored || stored.userId !== userId) return null;
+    return { first_name: stored.firstName ?? null, last_name: stored.lastName ?? null };
+  } catch {
+    // Unparseable or unavailable (private-mode quota, disabled storage) -
+    // a missing cached name is a degraded display, never a failure worth
+    // propagating to the caller.
+    return null;
+  }
+}
+
+function storeProfileName(userId, profile) {
+  try {
+    localStorage.setItem(
+      PROFILE_NAME_STORAGE_KEY,
+      JSON.stringify({
+        userId,
+        firstName: profile?.first_name ?? null,
+        lastName: profile?.last_name ?? null,
+      })
+    );
+  } catch {
+    // See above - persistence here is an offline nicety, not a
+    // correctness requirement.
+  }
+}
+
+function clearStoredProfileName() {
+  try {
+    localStorage.removeItem(PROFILE_NAME_STORAGE_KEY);
+  } catch {
+    // See above.
+  }
+}
+
+// Synchronous by design - the profile menu renders from this directly, so
+// an offline reload shows the name immediately rather than waiting on (and
+// then timing out) a query that can't succeed. Returns null when nothing
+// is known for this account, which callers render as their email instead.
+export function getCachedProfileName(userId) {
+  if (cachedProfile) return cachedProfile;
+  if (!userId) return null;
+  return readStoredProfileName(userId);
+}
+
 // Offline, a fetch doesn't always fail cleanly and quickly - it can just
 // hang with no response at all rather than rejecting (observed directly:
 // a genuinely offline browser sometimes leaves this request pending
@@ -112,12 +184,20 @@ const PROFILE_CHECK_TIMEOUT_MS = 5000;
 export async function isProfileComplete() {
   if (profileCompleteCache !== null) return profileCompleteCache;
   try {
+    const session = await getSession();
     const profile = await Promise.race([
       getProfile(),
       new Promise((_, reject) =>
         setTimeout(() => reject(new Error('Profile check timed out')), PROFILE_CHECK_TIMEOUT_MS)
       ),
     ]);
+    // Kept for the profile menu, so showing a name costs no extra query.
+    // Persisted too, so it survives an offline reload - the query above is
+    // exactly what can't succeed in that case.
+    if (profile) {
+      cachedProfile = profile;
+      if (session?.user?.id) storeProfileName(session.user.id, profile);
+    }
     profileCompleteCache = !needsNamePrompt(profile);
   } catch (err) {
     // This is an onboarding nicety, not an access control check - a
@@ -144,6 +224,9 @@ export function markProfileComplete() {
 
 export function resetProfileCache() {
   profileCompleteCache = null;
+  // In-memory only. The persisted copy deliberately outlives this (see
+  // signOut) so an offline reload can still show a name.
+  cachedProfile = null;
 }
 
 export async function submitProfileName(firstName, lastName) {
@@ -151,10 +234,17 @@ export async function submitProfileName(firstName, lastName) {
   if (!session) throw new Error('Not signed in.');
   const userId = session.user.id;
 
+  // Cached on each success path below rather than left for the next
+  // isProfileComplete() call to re-query: this is the one moment the new
+  // name is known for certain, and completeProfile.js navigates straight
+  // to a screen that wants to display it.
   const { error: insertError } = await supabase
     .from('profiles')
     .insert({ id: userId, first_name: firstName, last_name: lastName });
-  if (!insertError) return;
+  if (!insertError) {
+    rememberProfileName(userId, firstName, lastName);
+    return;
+  }
 
   // 23505 = unique_violation - a row already exists for this account
   // (created by the signup trigger, or from an earlier partial attempt),
@@ -174,4 +264,11 @@ export async function submitProfileName(firstName, lastName) {
   if (!data || data.length === 0) {
     throw new Error('This account already has a name on file.');
   }
+
+  rememberProfileName(userId, firstName, lastName);
+}
+
+function rememberProfileName(userId, firstName, lastName) {
+  cachedProfile = { first_name: firstName, last_name: lastName };
+  storeProfileName(userId, cachedProfile);
 }

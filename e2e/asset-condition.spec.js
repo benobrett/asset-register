@@ -24,8 +24,16 @@ test('sets condition and a note on capture, then shows both on the asset detail 
     await page.getByRole('row', { name: assetName }).click();
     await expect(page).toHaveURL(/#\/asset\//);
 
-    await expect(page.getByText('Poor', { exact: true })).toBeVisible();
-    await expect(page.getByText('Rust on the left hinge, still closes fine.')).toBeVisible();
+    // Scoped to the detail page's <article>, which the register has no
+    // equivalent of. The hash changes before route() (async) swaps the
+    // DOM, so an unscoped locator can run while the register is still
+    // mounted - where "Poor" legitimately appears twice, once in the card
+    // list and once in the table, since both layouts always render and
+    // CSS hides one. That's a strict-mode violation, which aborts
+    // outright rather than retrying into the detail page.
+    const assetDetail = page.getByRole('article');
+    await expect(assetDetail.getByText('Poor', { exact: true })).toBeVisible();
+    await expect(assetDetail.getByText('Rust on the left hinge, still closes fine.')).toBeVisible();
   } finally {
     await supabase.from('assets').delete().eq('asset_name', assetName);
   }
@@ -45,15 +53,20 @@ test('edits condition and note from the asset detail page', async ({ page }) => 
   try {
     await page.goto(`/#/asset/${asset.id}`);
 
-    await expect(page.getByText('Not set')).toBeVisible();
+    // Scoped to the <article> the read-only view renders (see the note in
+    // the test above). It's also what distinguishes displayed values from
+    // the edit form's own <option>s, which carry the same labels - the
+    // form replaces the article rather than nesting inside it.
+    const assetDetail = page.getByRole('article');
+    await expect(assetDetail.getByText('Not set')).toBeVisible();
 
     await page.getByRole('button', { name: 'Edit' }).click();
     await page.getByLabel('Condition', { exact: true }).selectOption('good');
     await page.getByLabel('Condition note').fill('Recently serviced.');
     await page.getByRole('button', { name: 'Save' }).click();
 
-    await expect(page.getByText('Good', { exact: true })).toBeVisible();
-    await expect(page.getByText('Recently serviced.')).toBeVisible();
+    await expect(assetDetail.getByText('Good', { exact: true })).toBeVisible();
+    await expect(assetDetail.getByText('Recently serviced.')).toBeVisible();
 
     const { data: updated } = await supabase
       .from('assets')

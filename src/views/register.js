@@ -1,5 +1,4 @@
 import { supabase } from '../supabase.js';
-import { signOut } from '../auth.js';
 import { formatAssetId, formatCondition } from '../format.js';
 import { confirmDialog } from '../confirmDialog.js';
 import { getUnsyncedAssets } from '../db.js';
@@ -46,7 +45,6 @@ export function renderRegister(container, { navigate }) {
     <section class="view view-register">
       <header class="view-header">
         <h1>Assets</h1>
-        <button type="button" class="link-button" id="logout">Log out</button>
       </header>
       <div class="register-actions">
         <button type="button" id="add-asset-button">Add New Asset</button>
@@ -84,10 +82,6 @@ export function renderRegister(container, { navigate }) {
   `;
 
   container.querySelector('#add-asset-button').addEventListener('click', () => navigate('#/capture'));
-  container.querySelector('#logout').addEventListener('click', async () => {
-    await signOut();
-    navigate('#/login');
-  });
 
   const listEl = container.querySelector('#asset-list');
   const tableBodyEl = container.querySelector('#asset-table-body');

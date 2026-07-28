@@ -7,8 +7,14 @@ import { renderCapture } from './views/capture.js';
 import { renderDetail } from './views/detail.js';
 import { renderCompleteProfile } from './views/completeProfile.js';
 import { syncAll, watchConnectivity } from './sync.js';
+import { mountProfileMenu } from './profileMenu.js';
 
 const app = document.getElementById('app');
+
+// Mounted once, outside #app, so it survives every view re-render - see
+// CLAUDE.md "Persistent chrome". route() only ever updates its
+// visibility and contents; it is never re-created.
+const updateProfileMenu = mountProfileMenu(document.getElementById('app-chrome'), { navigate });
 
 const routes = [
   { pattern: /^#\/login$/, view: renderLogin, public: true },
@@ -88,6 +94,14 @@ async function route() {
     window.location.hash = '#/register';
     return;
   }
+
+  // After the gates, before the view renders: the gates are the single
+  // source of truth about whether there's a usable session, and gate 4
+  // above is what populates the cached profile name this reads. Redirect
+  // paths return early without touching it - each one re-enters route()
+  // via hashchange, and that pass updates the chrome for the hash that
+  // actually renders.
+  updateProfileMenu(currentSession, hash);
 
   for (const { pattern, view } of routes) {
     const match = hash.match(pattern);

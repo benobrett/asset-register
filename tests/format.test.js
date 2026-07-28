@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { formatAssetId, formatCondition, conditionRank } from '../src/format.js';
+import {
+  formatAssetId,
+  formatCondition,
+  conditionRank,
+  formatInitials,
+  formatDisplayName,
+} from '../src/format.js';
 
 describe('formatAssetId', () => {
   it('zero-pads to two digits', () => {
@@ -41,5 +47,66 @@ describe('conditionRank', () => {
     expect(conditionRank(null)).toBeGreaterThan(conditionRank('poor'));
     expect(conditionRank(undefined)).toBeGreaterThan(conditionRank('poor'));
     expect(conditionRank('damaged')).toBeGreaterThan(conditionRank('poor'));
+  });
+});
+
+describe('formatInitials', () => {
+  it('takes the first letter of each name, uppercased', () => {
+    expect(formatInitials({ firstName: 'Ben', lastName: 'Brett' })).toBe('BB');
+    expect(formatInitials({ firstName: 'ada', lastName: 'lovelace' })).toBe('AL');
+  });
+
+  it('falls back to whichever single name is on file', () => {
+    expect(formatInitials({ firstName: 'Ben', lastName: null })).toBe('B');
+    expect(formatInitials({ firstName: null, lastName: 'Brett' })).toBe('B');
+  });
+
+  // The component renders a generic person icon on '' - deriving a letter
+  // from an email would be a guess about someone who hasn't told us.
+  it('returns an empty string when nothing can be derived', () => {
+    expect(formatInitials({ firstName: null, lastName: null })).toBe('');
+    expect(formatInitials({ firstName: '  ', lastName: '' })).toBe('');
+    expect(formatInitials({})).toBe('');
+    expect(formatInitials()).toBe('');
+  });
+
+  it('handles accented and non-Latin names', () => {
+    expect(formatInitials({ firstName: 'Ngā', lastName: 'Mihi' })).toBe('NM');
+    expect(formatInitials({ firstName: 'Émile', lastName: 'Zola' })).toBe('ÉZ');
+  });
+
+  // Array.from, not [0] - indexing a surrogate pair returns half a
+  // character, which renders as a replacement glyph.
+  it('does not split an astral character in half', () => {
+    expect(formatInitials({ firstName: '𝒜lice', lastName: 'Smith' })).toBe('𝒜S');
+  });
+});
+
+describe('formatDisplayName', () => {
+  it('prefers the full name', () => {
+    expect(
+      formatDisplayName({ firstName: 'Ben', lastName: 'Brett', email: 'ben@example.com' })
+    ).toBe('Ben Brett');
+  });
+
+  it('uses whichever single name is on file before falling back', () => {
+    expect(formatDisplayName({ firstName: 'Ben', email: 'ben@example.com' })).toBe('Ben');
+    expect(formatDisplayName({ lastName: 'Brett', email: 'ben@example.com' })).toBe('Brett');
+  });
+
+  // The completeness gate fails open, so an account with no name at all
+  // genuinely reaches the app - this is what stops "undefined undefined".
+  it('falls back to the email when no name is on file', () => {
+    expect(formatDisplayName({ firstName: null, lastName: null, email: 'ben@example.com' })).toBe(
+      'ben@example.com'
+    );
+    expect(formatDisplayName({ firstName: '   ', email: 'ben@example.com' })).toBe(
+      'ben@example.com'
+    );
+  });
+
+  it('returns an empty string when even the email is missing', () => {
+    expect(formatDisplayName({})).toBe('');
+    expect(formatDisplayName()).toBe('');
   });
 });
