@@ -316,6 +316,7 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  id-token: write
 
 concurrency:
   group: claude-review-${{ github.event.pull_request.number }}
@@ -344,7 +345,8 @@ jobs:
 - **Never a required check.** Branch protection only requires `ci.yml`'s `test`/`e2e` jobs, and this workflow isn't added to that list. A required check has to be objective and deterministic; an AI reviewer's output is neither, and making it blocking means a subjective suggestion or an API hiccup can hold up a merge — the predictable result is someone disabling the whole thing. Review findings are advice, acted on or dismissed at the PR author's judgment.
 - **Bills separately from a Claude subscription.** `ANTHROPIC_API_KEY` (a repository secret, referenced only via `secrets.` — never inline) authenticates against API credits, not the account this project is otherwise developed with. `--max-turns 30` and `timeout-minutes: 15` bound a single run's cost; `paths-ignore` skips doc-only changes entirely; `concurrency` with `cancel-in-progress` means pushing several commits in quick succession only bills for the last review, not one per push.
 - **Trigger is `pull_request`, not `pull_request_target`.** This is a public repository — `pull_request_target` runs with access to repository secrets in the context of the *base* branch, which combined with untrusted fork code is a well-known way to leak an API key. Reviewing fork PRs at all is out of scope for now; it would need its own careful design (most likely running with reduced/no secret access).
-- **Setup outside the codebase (one-time, repository-admin only):** install the Claude GitHub App (`/install-github-app` in a Claude Code terminal is the quickest route, or the manual steps at the [GitHub Actions docs](https://code.claude.com/docs/en/github-actions) — it requests read & write on Contents, Issues, and Pull requests), then add `ANTHROPIC_API_KEY` as a repository secret (Settings → Secrets and variables → Actions).
+- **Setup outside the codebase (one-time, repository-admin only):** install the Claude GitHub App (`/install-github-app` in a Claude Code terminal is the quickest route — needs a `gh` token with the `workflow` scope, `gh auth refresh -h github.com -s repo,workflow` if it's missing — or the manual steps at the [GitHub Actions docs](https://code.claude.com/docs/en/github-actions); it requests read & write on Contents, Issues, and Pull requests), then add `ANTHROPIC_API_KEY` as a repository secret (Settings → Secrets and variables → Actions).
+- `permissions.id-token: write` is required, not optional — confirmed directly: without it, `claude-code-action@v1` fails immediately with "Could not fetch an OIDC token" before it ever gets to reviewing anything. It authenticates against the installed GitHub App via OIDC, not just for the "read CI results" purpose some upstream examples' comments suggest.
 
 #### Review standards
 The reviewer reads this file the same as any Claude Code session, so pointing it at this project's actual failure modes (rather than leaving it to generic advice) belongs here rather than in the workflow's prompt:

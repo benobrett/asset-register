@@ -14,6 +14,12 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  # Needed for the action's own OIDC-based auth against the installed
+  # GitHub App - without it, claude-code-action@v1 fails immediately with
+  # "Could not fetch an OIDC token" before it ever gets to reviewing
+  # anything (confirmed directly: this is required, not just for reading
+  # CI results as some upstream examples' comments suggest).
+  id-token: write
 
 # A new push to the same PR cancels whatever review was already running for
 # it - three commits in quick succession shouldn't trigger three overlapping
