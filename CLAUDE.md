@@ -330,7 +330,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          fetch-depth: 0
 
       - name: Run Claude code review
         uses: anthropics/claude-code-action@v1
@@ -348,6 +348,7 @@ jobs:
 - **Setup outside the codebase (one-time, repository-admin only):** install the Claude GitHub App and its Actions workflow via `/install-github-app` in a Claude Code terminal (needs a `gh` token with the `workflow` scope, `gh auth refresh -h github.com -s repo,workflow` if it's missing) — this both installs the GitHub App and provisions `CLAUDE_CODE_OAUTH_TOKEN` as a repository secret automatically. **The wizard also pushes its own generic scaffolding as a branch** (`claude-code-review.yml` plus an unrelated `claude.yml` for interactive `@claude` PR/issue mentions) — that branch was deliberately not merged here: it lacks this workflow's cost/scope controls (`paths-ignore`, `concurrency`, `timeout-minutes`, `--max-turns`), and the `@claude`-mention workflow is a separate feature outside this issue's scope. Delete that stray branch rather than merging it if it reappears from a future `/install-github-app` re-run.
 - `permissions.id-token: write` is required, not optional — confirmed directly: without it, `claude-code-action@v1` fails immediately with "Could not fetch an OIDC token" before it ever gets to reviewing anything. It authenticates against the installed GitHub App via OIDC, not just for the "read CI results" purpose some upstream examples' comments suggest.
 - **A PR that itself adds or modifies this workflow file won't be reviewed by it.** The GitHub App validates that the workflow file running matches what's on `main` before executing — a PR changing the file necessarily fails that check once, harmlessly (`gh run view` shows "Workflow validation failed... this is normal... your workflow will begin working once you merge"). Expected, not a bug to chase.
+- **`fetch-depth: 0` (full history), not the upstream `claude.yml` example's `fetch-depth: 1`.** Confirmed directly: at depth 1, the review ran to completion (real turns, real cost) but silently posted nothing anywhere — no PR comment, no review, no check-run annotation. The `/code-review:code-review` skill diffs against the PR's base branch, and a depth-1 checkout has no base-branch history at all to diff against, so it likely found (and correctly reported) an empty diff. Worth remembering if a future run ever again "succeeds" with no findings on a PR that obviously has some.
 
 #### Review standards
 The reviewer reads this file the same as any Claude Code session, so pointing it at this project's actual failure modes (rather than leaving it to generic advice) belongs here rather than in the workflow's prompt:
