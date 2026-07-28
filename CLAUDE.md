@@ -111,6 +111,8 @@ Gate 4 is the one most likely to trip up a future change, so a few things worth 
 
 `onAuthChange` (`auth.js`) passes Supabase's event type through to its callback, not just the session, and `main.js` only treats `SIGNED_IN`/`SIGNED_OUT`/`PASSWORD_RECOVERY` as reasons to reset the profile cache and re-render (`AUTH_TRANSITION_EVENTS`). Supabase also fires this listener for `INITIAL_SESSION` (every page load — redundant with the explicit `route()` call already handling first paint) and `TOKEN_REFRESHED` (periodic, in the background, nothing the user did actually changed); treating those the same as a real transition used to mean 2-3x the queries and re-renders for a single sign-in.
 
+`SIGNED_IN` itself isn't a reliable "this is a genuine new sign-in" signal either: Supabase can also fire it while restoring a pre-existing session from storage on page load, not just on an interactive sign-in (undocumented, but observed directly — an e2e spec lost text it had just typed into a form, because this listener tore the view down again moments after first paint). `route()` sets a module-level `sessionCheckedOnce` flag the first time its own session check resolves; the listener ignores any transition event that arrives before that flag is set, since it's necessarily startup noise the explicit first-paint `route()` call is already handling, not a later, genuine transition.
+
 ## Data model (Supabase / Postgres)
 `schema.sql` is the full current schema and the thing to read for exact column lists — this section covers the shape and the reasoning, not a column-by-column copy that will only go stale again.
 

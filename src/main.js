@@ -40,6 +40,9 @@ function navigate(hash) {
 }
 
 let currentSession = null;
+// Set once route()'s own session check has resolved for the first time -
+// see the onAuthChange listener below for why this matters.
+let sessionCheckedOnce = false;
 
 async function route() {
   const hash = window.location.hash || '#/register';
@@ -47,6 +50,7 @@ async function route() {
   if (!currentSession) {
     currentSession = await getSession();
   }
+  sessionCheckedOnce = true;
 
   if (!currentSession && !PUBLIC_HASHES.has(hash)) {
     window.location.hash = '#/login';
@@ -114,6 +118,17 @@ onAuthChange((session, event) => {
   // may now be signed in, so the previous one's cached result can't be
   // reused.
   if (!AUTH_TRANSITION_EVENTS.has(event)) return;
+
+  // Supabase can also fire SIGNED_IN itself while restoring a pre-existing
+  // session on page load, not just on a genuine interactive sign-in - not
+  // documented, but observed directly (via an e2e spec that lost text
+  // typed into a form moments after load, because this handler tore the
+  // view down again right underneath it). route()'s own session check
+  // below already handles first paint, so any transition event arriving
+  // before that first check has resolved is startup noise, not a real
+  // transition - skip it rather than doubling up on the render it's
+  // about to do anyway.
+  if (!sessionCheckedOnce) return;
 
   resetProfileCache();
   route();
