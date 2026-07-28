@@ -3,6 +3,7 @@ import { validateAssetForm, validateRepairForm } from '../validation.js';
 import { watchPhotoPreview, buildPhotoPath } from '../camera.js';
 import { queueAsset, queueRepair } from '../db.js';
 import { syncAll } from '../sync.js';
+import { supabase } from '../supabase.js';
 
 function nowForDateTimeLocal() {
   const now = new Date();
@@ -237,16 +238,13 @@ export function renderCapture(container, { navigate }) {
       const assetId = crypto.randomUUID();
       const recordedAtIso = new Date(recordedAt).toISOString();
 
-      // Write to the offline queue first, then try to sync immediately —
-      // if the network drops mid-sync the record just stays queued and
-      // the 'online' listener in main.js retries it later.
-      await queueAsset({
+      // Save directly - faster than round-tripping through the queue.
+      await supabase.from('assets').insert({
         id: assetId,
-        assetName: assetName.trim(),
+        asset_name: assetName.trim(),
         description: description.trim(),
-        recordedAt: recordedAtIso,
-        photoPath,
-        photo: file ?? null,
+        recorded_at: recordedAtIso,
+        photo_path: photoPath,
       });
 
       for (const repair of pendingRepairs) {
