@@ -10,6 +10,14 @@ create table assets (
   description text not null,
   recorded_at timestamptz not null default now(),   -- the user-facing "Date/time" field: pre-populated client-side, editable
   photo_path text,                                   -- object path in Supabase Storage
+  -- Current state only, both nullable - every asset that predates this
+  -- feature has neither, and there's no sensible value to backfill.
+  -- Stored lowercase ('good'/'ok'/'poor'); display casing is a client-side
+  -- concern (format.js), not baked into the stored value or the check
+  -- constraint. No history is kept - editing overwrites the previous
+  -- value, same trade-off as any other "current state" field here.
+  condition text check (condition in ('good', 'ok', 'poor')),
+  condition_note text check (condition_note is null or length(condition_note) <= 200),
   created_by uuid references auth.users(id) default auth.uid(),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()

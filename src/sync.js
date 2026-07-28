@@ -32,6 +32,14 @@ export async function syncQueuedAssets() {
         description: asset.description,
         recorded_at: asset.recordedAt,
         photo_path: asset.photoPath,
+        // ?? null, not asset.condition directly - a record queued before
+        // this field existed (the app shell is service-worker cached, so
+        // an old queued record can still be sitting on a device when new
+        // code loads) has no condition/conditionNote property at all,
+        // and this treats that the same as a deliberately unset one
+        // rather than writing undefined into the insert.
+        condition: asset.condition ?? null,
+        condition_note: asset.conditionNote ?? null,
       });
       if (insertError) throw insertError;
 

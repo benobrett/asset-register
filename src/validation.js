@@ -1,6 +1,23 @@
+import { CONDITION_VALUES } from './format.js';
+
+// Matches the check constraint on assets.condition_note in schema.sql -
+// suggested by design as long enough for a real note ("rust on the left
+// hinge, still closes fine") but short enough to stay a note, not a
+// second description field.
+export const CONDITION_NOTE_MAX_LENGTH = 200;
+
 // Pure validation logic for the asset and repair forms — kept separate from
 // the views so it can be unit tested without a DOM or Supabase client.
-export function validateAssetForm({ assetName, description, recordedAt }) {
+//
+// condition/conditionNote are folded into this shared validator rather
+// than a separate function: both capture.js and detail.js already
+// validate the rest of the asset fields through validateAssetForm, so one
+// combined validator per form stays consistent with the rest of this file.
+// Both are optional - field staff logging assets quickly (sometimes
+// offline) shouldn't be blocked by one more required field, and a forced
+// choice would produce guessed data. A blank/unset value is never an
+// error; only an invalid one is.
+export function validateAssetForm({ assetName, description, recordedAt, condition, conditionNote }) {
   const errors = {};
 
   if (!assetName || !assetName.trim()) {
@@ -15,6 +32,14 @@ export function validateAssetForm({ assetName, description, recordedAt }) {
     errors.recordedAt = 'Date/time is required.';
   } else if (Number.isNaN(new Date(recordedAt).getTime())) {
     errors.recordedAt = 'Date/time is invalid.';
+  }
+
+  if (condition && !CONDITION_VALUES.includes(condition)) {
+    errors.condition = 'Condition must be Good, OK, or Poor.';
+  }
+
+  if (conditionNote && conditionNote.trim().length > CONDITION_NOTE_MAX_LENGTH) {
+    errors.conditionNote = `Condition note must be ${CONDITION_NOTE_MAX_LENGTH} characters or fewer.`;
   }
 
   return { valid: Object.keys(errors).length === 0, errors };

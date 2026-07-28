@@ -3,6 +3,7 @@ import { validateAssetForm, validateRepairForm } from '../validation.js';
 import { watchPhotoPreview, buildPhotoPath } from '../camera.js';
 import { queueAsset, queueRepair } from '../db.js';
 import { syncAll } from '../sync.js';
+import { CONDITION_VALUES, formatCondition } from '../format.js';
 
 function nowForDateTimeLocal() {
   const now = new Date();
@@ -47,6 +48,25 @@ export function renderCapture(container, { navigate }) {
           <textarea name="description" rows="3" required></textarea>
         </label>
         <p class="field-error" data-error-for="description" hidden></p>
+
+        <!-- Explicit for/id, not a wrapping label like the other fields
+             here - a <select>'s accessible name, when wrapped, otherwise
+             concatenates every <option>'s own text alongside the label
+             text, making it unmatchable by its plain label text alone. -->
+        <label for="condition-select">Condition</label>
+        <select id="condition-select" name="condition">
+          <option value="">Not set</option>
+          ${CONDITION_VALUES.map(
+            (value) => `<option value="${value}">${formatCondition(value)}</option>`
+          ).join('')}
+        </select>
+        <p class="field-error" data-error-for="condition" hidden></p>
+
+        <label>
+          Condition note
+          <input type="text" name="conditionNote" maxlength="200" />
+        </label>
+        <p class="field-error" data-error-for="conditionNote" hidden></p>
 
         <div id="repairs-section"></div>
 
@@ -221,8 +241,19 @@ export function renderCapture(container, { navigate }) {
     const assetName = form.assetName.value;
     const description = form.description.value;
     const recordedAt = form.recordedAt.value;
+    // '' (the "Not set" option) means unset, not an empty string worth
+    // storing - normalised to null before it ever reaches validation or
+    // the queue.
+    const condition = form.condition.value || null;
+    const conditionNote = form.conditionNote.value.trim() || null;
 
-    const { valid, errors } = validateAssetForm({ assetName, description, recordedAt });
+    const { valid, errors } = validateAssetForm({
+      assetName,
+      description,
+      recordedAt,
+      condition,
+      conditionNote,
+    });
     showFieldErrors(errors);
     if (!valid) return;
 
@@ -247,6 +278,8 @@ export function renderCapture(container, { navigate }) {
         recordedAt: recordedAtIso,
         photoPath,
         photo: file ?? null,
+        condition,
+        conditionNote,
       });
 
       for (const repair of pendingRepairs) {
