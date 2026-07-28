@@ -301,6 +301,62 @@ jobs:
       - uses: actions/deploy-pages@v4
 ```
 
+### Automated code review
+`.github/workflows/claude-review.yml` — separate from `ci.yml` so a review failure or API outage can never affect the lint/test signal — runs an AI code review on every PR via `anthropics/claude-code-action@v1` and the official `code-review` plugin:
+```yaml
+name: Claude Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude code review
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          plugin_marketplaces: "https://github.com/anthropics/claude-code.git"
+          plugins: "code-review@claude-code-plugins"
+          prompt: "/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
+          claude_args: |
+            --max-turns 30
+```
+- **Never a required check.** Branch protection only requires `ci.yml`'s `test`/`e2e` jobs, and this workflow isn't added to that list. A required check has to be objective and deterministic; an AI reviewer's output is neither, and making it blocking means a subjective suggestion or an API hiccup can hold up a merge — the predictable result is someone disabling the whole thing. Review findings are advice, acted on or dismissed at the PR author's judgment.
+- **Bills separately from a Claude subscription.** `ANTHROPIC_API_KEY` (a repository secret, referenced only via `secrets.` — never inline) authenticates against API credits, not the account this project is otherwise developed with. `--max-turns 30` and `timeout-minutes: 15` bound a single run's cost; `paths-ignore` skips doc-only changes entirely; `concurrency` with `cancel-in-progress` means pushing several commits in quick succession only bills for the last review, not one per push.
+- **Trigger is `pull_request`, not `pull_request_target`.** This is a public repository — `pull_request_target` runs with access to repository secrets in the context of the *base* branch, which combined with untrusted fork code is a well-known way to leak an API key. Reviewing fork PRs at all is out of scope for now; it would need its own careful design (most likely running with reduced/no secret access).
+- **Setup outside the codebase (one-time, repository-admin only):** install the Claude GitHub App (`/install-github-app` in a Claude Code terminal is the quickest route, or the manual steps at the [GitHub Actions docs](https://code.claude.com/docs/en/github-actions) — it requests read & write on Contents, Issues, and Pull requests), then add `ANTHROPIC_API_KEY` as a repository secret (Settings → Secrets and variables → Actions).
+
+#### Review standards
+The reviewer reads this file the same as any Claude Code session, so pointing it at this project's actual failure modes (rather than leaving it to generic advice) belongs here rather than in the workflow's prompt:
+- **Offline correctness** — any new save path must go through the IndexedDB queue in `db.js` (`queueAsset`/`queueRepair`/`queueRepairComment`, or the same shape for a new entity), never a direct Supabase call from a view. This is the easiest thing to get wrong here and the most damaging in the field — see "Offline strategy".
+- **Sync ordering** — `sync.js`'s `syncAll()` must sync assets, then repairs, then repair comments, in that order; each references the row before it as a foreign key.
+- **Security** — the Supabase *service role* key must never appear anywhere in this codebase (only the publishable/anon key belongs in client code); RLS assumptions in "Row Level Security" shouldn't be silently bypassed or reinterpreted; no secrets or tokens in logs or error messages.
+- **Auth gates** — a change to `main.js`'s routing must preserve the gate order in "Routing and auth/profile gates" and must not break `isProfileComplete()`'s fail-open behavior (a broken profile query should never lock a field worker out of the app) or its `sessionCheckedOnce` guard against startup `SIGNED_IN` noise.
+- **Test coverage** — new pure logic (validation, formatting, queue/sync logic) needs Vitest coverage; a new or changed user-facing flow needs a Playwright spec — see "Testing conventions".
+- **Conventions** — vanilla HTML/CSS/JS, no UI framework or new dependency without clear justification; views follow the existing render-from-scratch pattern in "View pattern" rather than introducing partial DOM patching.
+
+Flag security and correctness issues loudly; style suggestions quietly — the point is separating signal from noise, not maximizing comment count.
+
 ## Commands
 - `npm run dev` — Vite dev server
 - `npm run build` — production build (also used by the deploy workflow)
