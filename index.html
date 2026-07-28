@@ -7,6 +7,10 @@
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
+    <!-- Persistent app chrome: a sibling of #app, never a child. Views
+         rewrite #app wholesale on every re-render, so anything inside it
+         is destroyed and rebuilt with them. Mounted once from main.js. -->
+    <header class="app-chrome" id="app-chrome" hidden></header>
     <div id="app"></div>
     <script type="module" src="/src/main.js"></script>
   </body>

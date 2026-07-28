@@ -43,6 +43,13 @@ export function confirmDialog({ message, confirmLabel = 'Delete', cancelLabel = 
     backdrop.querySelector('.modal-confirm-button').addEventListener('click', () => close(true));
     document.addEventListener('keydown', onKeydown);
 
+    // Announced rather than calling into the profile menu directly - this
+    // dialog is generic shared UI and shouldn't know what chrome happens
+    // to exist around it. Anything that must not stay open underneath a
+    // modal listens for this. (The stacking order is settled separately
+    // in style.css: this backdrop is z-index 100, the profile popover 95.)
+    document.dispatchEvent(new CustomEvent('app:modal-open'));
+
     document.body.appendChild(backdrop);
     backdrop.querySelector('.modal-confirm-button').focus();
   });

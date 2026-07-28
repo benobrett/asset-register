@@ -30,3 +30,31 @@ export function conditionRank(condition) {
   const index = CONDITION_VALUES.indexOf(condition);
   return index === -1 ? CONDITION_VALUES.length : index;
 }
+
+// Array.from, not [0] - a name starting with an astral character (an
+// emoji, some CJK extensions) is two UTF-16 code units, and indexing
+// would slice it in half into an unrenderable lone surrogate.
+function firstCharacter(value) {
+  const trimmed = (value ?? '').trim();
+  return trimmed ? Array.from(trimmed)[0].toUpperCase() : '';
+}
+
+// Returns '' rather than a placeholder glyph when nothing can be derived -
+// what to show instead is presentation, and belongs to the component, not
+// to a formatting helper. Callers must handle the empty case.
+export function formatInitials({ firstName, lastName } = {}) {
+  return `${firstCharacter(firstName)}${firstCharacter(lastName)}`;
+}
+
+// Full name → whichever single name is on file → email. The profile
+// completeness gate deliberately fails open (see auth.js), so an account
+// with no name at all can reach the app - the email fallback is what
+// stops that rendering as "undefined undefined" or an empty box. Same
+// name-then-email chain repair comments already use for their authors.
+export function formatDisplayName({ firstName, lastName, email } = {}) {
+  const name = [firstName, lastName]
+    .map((part) => (part ?? '').trim())
+    .filter(Boolean)
+    .join(' ');
+  return name || (email ?? '').trim();
+}

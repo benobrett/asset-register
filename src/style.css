@@ -77,6 +77,96 @@ body {
   min-height: 100vh;
 }
 
+/* Persistent chrome, a sibling of #app rather than part of any view -
+   see CLAUDE.md. Matched to #app's own width and horizontal padding so
+   the icon lines up with the content column instead of floating off at
+   the viewport edge on a wide screen.
+
+   sticky, not static: in plain flow the bar scrolls away with the page,
+   which leaves the icon unreachable on a long register and makes the
+   browser yank the user back to the top just to click it. sticky keeps
+   it in flow (so it reserves its own space and can't overlap a view's
+   own .view-header, which already puts controls top-right in this same
+   column) while pinning it in view as the page scrolls.
+
+   The z-index makes this a stacking context at 95, deliberately between
+   the repair info panel's phone-width bottom sheet (90) and
+   confirmDialog's backdrop (100) - the popover inside therefore can't
+   escape above a modal no matter what it sets. The background is what
+   stops content scrolling visibly underneath the pinned bar. */
+.app-chrome {
+  position: sticky;
+  top: 0;
+  z-index: 95;
+  display: flex;
+  justify-content: flex-end;
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 0.75rem 1rem 0;
+  background: var(--color-bg);
+}
+
+/* display: flex above would otherwise win over the attribute's own
+   display: none. */
+.app-chrome[hidden] {
+  display: none;
+}
+
+/* 2.75rem = 44px, the usual floor for a comfortable touch target - this
+   is a Chromebook tablet in the field, not a mouse pointer. */
+.profile-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  border-radius: 999px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  color: var(--color-primary-ink);
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.profile-button:hover {
+  background: var(--color-surface-alt);
+  border-color: var(--color-border-strong);
+}
+
+.profile-button:active {
+  background: var(--color-surface-alt);
+}
+
+/* Anchored to the icon and overlaid (absolute, so the view underneath
+   neither reflows nor scrolls when it opens). Stacking is inherited from
+   .app-chrome's context above rather than set again here - one number to
+   reason about, and no way for this to accidentally outrank a modal. */
+.profile-popover {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  right: 1rem;
+  min-width: 12rem;
+  /* Can't outgrow the column it's anchored in - at phone width the
+     right edge is close enough that a wide popover would otherwise be
+     clipped off-screen. */
+  max-width: calc(100vw - 2rem);
+  padding: 0.85rem 1rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lift);
+}
+
+.profile-popover-name {
+  margin: 0;
+  font-weight: 600;
+  /* A long name or a fallback email address wraps rather than forcing
+     the popover wider than its max-width. */
+  overflow-wrap: anywhere;
+}
+
 h1 {
   font-size: 1.25rem;
   margin: 0;
@@ -583,6 +673,12 @@ button[type='submit']:active {
 
 @media (min-width: 768px) {
   #app {
+    max-width: 900px;
+  }
+
+  /* Kept in step with #app above, so the icon stays aligned with the
+     content column rather than drifting away from it. */
+  .app-chrome {
     max-width: 900px;
   }
 

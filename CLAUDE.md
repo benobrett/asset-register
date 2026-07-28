@@ -48,14 +48,15 @@ Built on Windows, running on a Chromebook (ChromeOS/Chrome) in the field. Being 
 ├── public/                 Static assets served as-is (currently just the Quicksand font's OFL licence text — no PWA icons yet, see the TODO in vite.config.js)
 ├── src/
 │   ├── main.js              Hash-based routing (no router library) + the auth/profile gates — see "Routing and auth/profile gates"
-│   ├── auth.js              Login/signup/session, plus profile-completeness helpers (getProfile, isProfileComplete, submitProfileName)
+│   ├── auth.js              Login/signup/session, plus profile-completeness helpers (getProfile, isProfileComplete, submitProfileName) and the cached/persisted profile name (getCachedProfileName)
 │   ├── camera.js            Thin wrapper around the file input's photo preview + path naming
 │   ├── db.js                IndexedDB offline queue
 │   ├── sync.js              Pushes the queue to Supabase on reconnect
 │   ├── supabase.js          Supabase client init + signed photo URLs
 │   ├── validation.js        Pure, unit-tested form-validation logic
-│   ├── format.js            Small display-formatting helpers (e.g. the "Item-01" asset ID)
+│   ├── format.js            Small display-formatting helpers (the "Item-01" asset ID, condition labels/rank, profile initials + display-name fallback)
 │   ├── confirmDialog.js     Promise-based confirm/cancel modal (see "View pattern" below)
+│   ├── profileMenu.js       Persistent profile icon + read-only popover (see "Persistent chrome" below)
 │   ├── assets/              Logo + font, imported from JS/CSS (not referenced from public/) so Vite base-prefixes them correctly under GitHub Pages' subpath
 │   ├── views/
 │   │   ├── login.js           Login, and signup (first name, last name, email, password, in that order)
@@ -91,6 +92,17 @@ Built on Windows, running on a Chromebook (ChromeOS/Chrome) in the field. Being 
 There's no component framework, so every view follows the same shape: a function `(container, { navigate, params }) => void` that renders its own HTML into `container` via a template string, then wires up event listeners by querying the DOM it just wrote. A view whose state changes after user interaction (opening an edit form, expanding a repair's comment thread, etc.) doesn't patch the DOM — it re-runs its own `drawView()`-style function, which re-renders the whole template from current state and re-wires everything from scratch. This is simple at the cost of being coarse-grained; it's a deliberate trade-off for an app this size, not an oversight.
 
 `confirmDialog({ message })` is the one shared UI primitive outside this pattern: it builds its own backdrop/modal, appends it to `document.body` directly (not into a view's `container`), and returns a Promise that resolves `true` on confirm or `false` on cancel/backdrop-click/Escape. Views awaiting it don't need to render or tear down anything themselves.
+
+### Persistent chrome
+`index.html` has a second top-level element beside `#app`: `<header id="app-chrome">`, which `main.js` mounts `profileMenu.js` into **once**, at startup. `route()` then only ever calls the updater it returns — it never re-creates it.
+
+**Anything persistent across views has to live here, not inside a view.** The view pattern above rewrites a view's whole container on every re-render, so UI rendered inside one is destroyed and rebuilt whenever that view redraws (opening an edit form, expanding a comment thread). For the profile menu that would mean an open popover vanishing mid-interaction and focus being lost; it would also make every new view a fresh chance to forget to include it. Add to the chrome element instead — and keep it out of `src/views/`, which is for routes.
+
+Two things about it are load-bearing and easy to undo by accident:
+- **`.app-chrome` is `position: sticky`, not static.** In plain flow the bar scrolls away with the page, which leaves the icon unreachable on a long register — and makes the browser scroll the user back to the top just to click it (caught by the e2e spec, which scrolls before asserting). Sticky keeps it in flow, so it reserves its own space and can't overlap a view's own `.view-header` (which already puts controls top-right in the same column), while staying pinned in view.
+- **Its `z-index: 95` makes it a stacking context**, deliberately between the repair info panel's phone-width bottom sheet (90) and `confirmDialog`'s backdrop (100). The popover inside therefore cannot outrank a modal whatever it sets. `confirmDialog` also dispatches an `app:modal-open` event as it opens, which the profile menu listens for and closes on — it announces rather than reaching into the menu directly, so shared UI stays unaware of whatever chrome surrounds it.
+
+The name comes from the profile cache in `auth.js` (`getCachedProfileName`), never a fresh query. That cache is also persisted to `localStorage`, keyed by user id, so an offline reload still shows a name — the profile query is exactly what can't succeed then. `localStorage` rather than `db.js`: those helpers are all shaped around the offline *sync queue* (`queueX`/`getUnsyncedX`/`markXSynced`), and a cached display name is a read-through cache, not a queued mutation. It's cleared on `signOut()` only — deliberately not in `resetProfileCache()`, which also runs on sign-in, where a restore-`SIGNED_IN` on an ordinary offline reload would otherwise wipe the very thing it exists to preserve.
 
 `validation.js` holds every form's validation as a pure function (`validateAssetForm`, `validateRepairForm`, `validateNameForm`, `validatePassword`, `validatePasswordResetForm`) — no DOM, no Supabase — so it can be unit tested directly and reused wherever the same rules apply twice. `validateNameForm` is shared between the signup form and the post-login name prompt; `validatePassword` is shared between signup and the password-reset screen, for the same reason — the reset screen must never accept a password signup would have rejected.
 
