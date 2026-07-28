@@ -100,6 +100,12 @@ test('deletes an asset from the card list at phone width', async ({ page }) => {
     // instead.
     const row = page.locator('.asset-list-item').filter({ hasText: deleteAssetName });
     const deleteButton = page.getByRole('button', { name: `Delete ${deleteAssetName}` });
+
+    // Same reason as register-view.spec.js's delete test: let the
+    // debounced search render before acting, so its timer can't fire
+    // mid-delete and blank the list out from under the assertions.
+    await expect(row).toHaveCount(1);
+
     await row.hover();
     await deleteButton.click();
 
