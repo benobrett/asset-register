@@ -3,7 +3,7 @@ import { getSession, getProfile } from '../auth.js';
 import { validateAssetForm, validateRepairForm } from '../validation.js';
 import { queueAsset, queueRepair, queueRepairComment } from '../db.js';
 import { syncAll } from '../sync.js';
-import { formatAssetId } from '../format.js';
+import { formatAssetId, CONDITION_VALUES, formatCondition } from '../format.js';
 import { confirmDialog } from '../confirmDialog.js';
 
 const TRASH_ICON_SVG = `
@@ -83,7 +83,7 @@ export async function renderDetail(container, { navigate, params }) {
   const [assetResult, repairsResult, currentUserProfile] = await Promise.all([
     supabase
       .from('assets')
-      .select('id, asset_number, asset_name, description, recorded_at, photo_path')
+      .select('id, asset_number, asset_name, description, recorded_at, photo_path, condition, condition_note')
       .eq('id', params.id)
       .single(),
     supabase
@@ -400,6 +400,10 @@ export async function renderDetail(container, { navigate, params }) {
           <dd>${escapeHtml(asset.description)}</dd>
           <dt>Date/time</dt>
           <dd>${new Date(asset.recorded_at).toLocaleString()}</dd>
+          <dt>Condition</dt>
+          <dd>${formatCondition(asset.condition) ?? 'Not set'}</dd>
+          <dt>Condition note</dt>
+          <dd>${asset.condition_note ? escapeHtml(asset.condition_note) : '—'}</dd>
         </dl>
         <p class="form-error" id="delete-error" role="alert" hidden></p>
         <div class="edit-actions">
@@ -853,6 +857,26 @@ export async function renderDetail(container, { navigate, params }) {
         </label>
         <p class="field-error" data-error-for="description" hidden></p>
 
+        <!-- Explicit for/id, not a wrapping label like the other fields
+             here - a <select>'s accessible name, when wrapped, otherwise
+             concatenates every <option>'s own text alongside the label
+             text, making it unmatchable by its plain label text alone. -->
+        <label for="condition-select">Condition</label>
+        <select id="condition-select" name="condition">
+          <option value="" ${!asset.condition ? 'selected' : ''}>Not set</option>
+          ${CONDITION_VALUES.map(
+            (value) =>
+              `<option value="${value}" ${asset.condition === value ? 'selected' : ''}>${formatCondition(value)}</option>`
+          ).join('')}
+        </select>
+        <p class="field-error" data-error-for="condition" hidden></p>
+
+        <label>
+          Condition note
+          <input type="text" name="conditionNote" maxlength="200" value="${escapeHtml(asset.condition_note ?? '')}" />
+        </label>
+        <p class="field-error" data-error-for="conditionNote" hidden></p>
+
         <p class="form-error" id="submit-error" role="alert" hidden></p>
         <div class="edit-actions">
           <button type="submit">Save</button>
@@ -886,8 +910,16 @@ export async function renderDetail(container, { navigate, params }) {
       const assetName = form.assetName.value;
       const description = form.description.value;
       const recordedAt = form.recordedAt.value;
+      const condition = form.condition.value || null;
+      const conditionNote = form.conditionNote.value.trim() || null;
 
-      const { valid, errors } = validateAssetForm({ assetName, description, recordedAt });
+      const { valid, errors } = validateAssetForm({
+        assetName,
+        description,
+        recordedAt,
+        condition,
+        conditionNote,
+      });
       showFieldErrors(errors);
       if (!valid) return;
 
@@ -902,6 +934,8 @@ export async function renderDetail(container, { navigate, params }) {
           recordedAt: new Date(recordedAt).toISOString(),
           photoPath: asset.photo_path,
           photo: null,
+          condition,
+          conditionNote,
         });
 
         if (navigator.onLine) {
@@ -913,6 +947,8 @@ export async function renderDetail(container, { navigate, params }) {
           asset_name: assetName.trim(),
           description: description.trim(),
           recorded_at: new Date(recordedAt).toISOString(),
+          condition,
+          condition_note: conditionNote,
         };
         drawView();
       } catch (err) {

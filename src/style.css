@@ -36,6 +36,13 @@
   --color-repair-highlight-border: #bfdbfe;
   --color-repair-highlight-text: #1d4ed8;
 
+  --color-condition-good-bg: #eafaf0;
+  --color-condition-good-text: #1a7f4c;
+  --color-condition-ok-bg: #fff8e1;
+  --color-condition-ok-text: #92650a;
+  --color-condition-poor-bg: #fdeceb;
+  --color-condition-poor-text: #b3261e;
+
   /* Kept separate from --color-error (sized for inline validation text,
      and far too light in dark mode to work as a button fill) so a
      destructive button/icon reads the same in both themes. */
@@ -599,6 +606,34 @@ button[type='submit']:active {
   margin-left: auto;
 }
 
+/* Same pill language as .repair-status-todo, one background/text pair per
+   condition value - card badge and table cell both use this class, so
+   the two layouts never drift into different visual treatments. */
+.condition-tag {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.condition-tag.condition-good {
+  background: var(--color-condition-good-bg);
+  color: var(--color-condition-good-text);
+}
+
+.condition-tag.condition-ok {
+  background: var(--color-condition-ok-bg);
+  color: var(--color-condition-ok-text);
+}
+
+.condition-tag.condition-poor {
+  background: var(--color-condition-poor-bg);
+  color: var(--color-condition-poor-text);
+}
+
 .asset-list-text {
   display: flex;
   flex-direction: column;
@@ -943,6 +978,13 @@ button[type='submit']:active {
     --color-repair-highlight-bg: #16233a;
     --color-repair-highlight-border: #2c4568;
     --color-repair-highlight-text: #8fc1ff;
+
+    --color-condition-good-bg: #14261c;
+    --color-condition-good-text: #6fdb9f;
+    --color-condition-ok-bg: #2a2410;
+    --color-condition-ok-text: #e0c46a;
+    --color-condition-poor-bg: #3a1613;
+    --color-condition-poor-text: #ff6b60;
 
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 1px rgba(0, 0, 0, 0.24);
     --shadow-md: 0 8px 20px rgba(0, 0, 0, 0.36), 0 2px 6px rgba(0, 0, 0, 0.24);

@@ -1,6 +1,6 @@
 import { supabase } from '../supabase.js';
 import { signOut } from '../auth.js';
-import { formatAssetId } from '../format.js';
+import { formatAssetId, formatCondition } from '../format.js';
 import { confirmDialog } from '../confirmDialog.js';
 import { getUnsyncedAssets } from '../db.js';
 
@@ -72,6 +72,7 @@ export function renderRegister(container, { navigate }) {
               <th>Asset ID</th>
               <th>Name</th>
               <th>Description</th>
+              <th>Condition</th>
               <th>Status</th>
               <th>Repairs</th>
             </tr>
@@ -117,6 +118,7 @@ export function renderRegister(container, { navigate }) {
         <span class="asset-list-text">
           <span class="asset-name">${escapeHtml(asset.assetName)}</span>
           <span class="asset-meta">Not yet synced</span>
+          ${renderConditionBadge(asset.condition)}
         </span>
         <span class="repair-tag">⏳ Syncing…</span>
       </span>
@@ -129,6 +131,7 @@ export function renderRegister(container, { navigate }) {
       <td>—</td>
       <td>${escapeHtml(asset.assetName)}</td>
       <td class="asset-table-description">${escapeHtml(asset.description)}</td>
+      ${renderConditionCell(asset.condition)}
       <td><span class="repair-tag">⏳ Syncing…</span></td>
       <td>—</td>
     `;
@@ -137,14 +140,16 @@ export function renderRegister(container, { navigate }) {
 
   async function loadAssets(searchTerm, sortKey) {
     listEl.innerHTML = '<li class="asset-list-status">Loading…</li>';
-    tableBodyEl.innerHTML = '<tr><td colspan="5">Loading…</td></tr>';
+    tableBodyEl.innerHTML = '<tr><td colspan="6">Loading…</td></tr>';
     errorEl.hidden = true;
     errorEl.classList.remove('form-notice');
 
     const sort = SORT_OPTIONS[sortKey];
+    // condition_note is deliberately not selected - the register is a
+    // scanning view, and free text has no place in a dense list/table.
     let query = supabase
       .from('assets')
-      .select('id, asset_number, asset_name, description, recorded_at')
+      .select('id, asset_number, asset_name, description, recorded_at, condition')
       .order(sort.column, { ascending: sort.ascending });
 
     if (searchTerm) {
@@ -232,7 +237,7 @@ export function renderRegister(container, { navigate }) {
     if (!displayData.length && !pendingOnly.length) {
       const emptyMessage = sort.repairsOnly ? 'No assets with repairs found.' : 'No assets found.';
       listEl.innerHTML = `<li class="asset-list-status">${emptyMessage}</li>`;
-      tableBodyEl.innerHTML = `<tr><td colspan="5">${emptyMessage}</td></tr>`;
+      tableBodyEl.innerHTML = `<tr><td colspan="6">${emptyMessage}</td></tr>`;
       return;
     }
 
@@ -282,6 +287,7 @@ export function renderRegister(container, { navigate }) {
           <span class="asset-list-text">
             <span class="asset-name">${escapeHtml(asset.asset_name)}</span>
             <span class="asset-meta">${formatAssetId(asset.asset_number)}</span>
+            ${renderConditionBadge(asset.condition)}
           </span>
           ${hasOutstandingRepair ? '<span class="repair-tag">🔧 Repair logged</span>' : ''}
         </button>
@@ -309,6 +315,7 @@ export function renderRegister(container, { navigate }) {
         <td>${formatAssetId(asset.asset_number)}</td>
         <td>${escapeHtml(asset.asset_name)}</td>
         <td class="asset-table-description">${escapeHtml(asset.description)}</td>
+        ${renderConditionCell(asset.condition)}
         <td>${hasOutstandingRepair ? '<span class="repair-tag">🔧 To do</span>' : 'OK'}</td>
         <td>${outstandingCount}</td>
       `;
@@ -344,6 +351,23 @@ function escapeHtml(value) {
   const div = document.createElement('div');
   div.textContent = value ?? '';
   return div.innerHTML;
+}
+
+// Table cell - always renders something, even when unset, so an unset
+// condition reads as "not recorded yet" rather than a blank cell that
+// looks like a rendering bug.
+function renderConditionCell(condition) {
+  const label = formatCondition(condition);
+  if (!label) return '<td>—</td>';
+  return `<td><span class="condition-tag condition-${condition}">${label}</span></td>`;
+}
+
+// Card badge - omitted entirely when unset, matching how the repair-tag
+// badge on this same card only appears when there's something to say.
+function renderConditionBadge(condition) {
+  const label = formatCondition(condition);
+  if (!label) return '';
+  return `<span class="condition-tag condition-${condition}">${label}</span>`;
 }
 
 // A queued asset never went through the server-side ilike search the

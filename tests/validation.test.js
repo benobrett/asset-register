@@ -47,6 +47,60 @@ describe('validateAssetForm', () => {
     expect(result.valid).toBe(false);
     expect(result.errors.recordedAt).toBeDefined();
   });
+
+  it('passes with no condition or condition note - both are optional', () => {
+    const result = validateAssetForm({
+      assetName: 'Office chair 12',
+      description: 'Office chair',
+      recordedAt: '2026-07-25T10:00',
+    });
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual({});
+  });
+
+  it('passes with a valid condition and note', () => {
+    const result = validateAssetForm({
+      assetName: 'Office chair 12',
+      description: 'Office chair',
+      recordedAt: '2026-07-25T10:00',
+      condition: 'ok',
+      conditionNote: 'Slight wobble in one leg.',
+    });
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual({});
+  });
+
+  it('rejects a condition value outside good/ok/poor', () => {
+    const result = validateAssetForm({
+      assetName: 'Office chair 12',
+      description: 'Office chair',
+      recordedAt: '2026-07-25T10:00',
+      condition: 'damaged',
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors.condition).toBeDefined();
+  });
+
+  it('rejects a condition note over 200 characters', () => {
+    const result = validateAssetForm({
+      assetName: 'Office chair 12',
+      description: 'Office chair',
+      recordedAt: '2026-07-25T10:00',
+      conditionNote: 'x'.repeat(201),
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors.conditionNote).toBeDefined();
+  });
+
+  it('accepts a condition note of exactly 200 characters', () => {
+    const result = validateAssetForm({
+      assetName: 'Office chair 12',
+      description: 'Office chair',
+      recordedAt: '2026-07-25T10:00',
+      conditionNote: 'x'.repeat(200),
+    });
+    expect(result.valid).toBe(true);
+  });
 });
 
 describe('validateRepairForm', () => {

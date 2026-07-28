@@ -76,9 +76,69 @@ describe('syncQueuedAssets', () => {
       description: 'Office chair',
       recorded_at: '2026-07-25T10:00:00.000Z',
       photo_path: 'user-1/1.jpg',
+      condition: null,
+      condition_note: null,
     });
     expect(markAssetSyncedMock).toHaveBeenCalledWith('1');
     expect(result).toEqual({ succeeded: ['1'], failed: [] });
+  });
+
+  it('includes condition and condition_note when set', async () => {
+    getUnsyncedAssetsMock.mockResolvedValue([
+      {
+        id: '4',
+        assetName: 'Wheelbarrow',
+        description: 'Garden wheelbarrow',
+        recordedAt: '2026-07-25T10:00:00.000Z',
+        photoPath: null,
+        photo: null,
+        condition: 'poor',
+        conditionNote: 'Squeaky wheel, still usable.',
+      },
+    ]);
+
+    await syncQueuedAssets();
+
+    expect(tableUpsert).toHaveBeenCalledWith({
+      id: '4',
+      asset_name: 'Wheelbarrow',
+      description: 'Garden wheelbarrow',
+      recorded_at: '2026-07-25T10:00:00.000Z',
+      photo_path: null,
+      condition: 'poor',
+      condition_note: 'Squeaky wheel, still usable.',
+    });
+  });
+
+  // A record queued before condition/conditionNote existed - the app
+  // shell is service-worker cached, so a device can plausibly still have
+  // one of these sitting in its queue when the new code loads. It must
+  // sync as "unset", not throw or write undefined into the insert.
+  it('syncs an old-shape queued asset with no condition fields at all', async () => {
+    getUnsyncedAssetsMock.mockResolvedValue([
+      {
+        id: '5',
+        assetName: 'Ladder',
+        description: 'Aluminium ladder',
+        recordedAt: '2026-07-25T10:00:00.000Z',
+        photoPath: null,
+        photo: null,
+      },
+    ]);
+
+    const result = await syncQueuedAssets();
+
+    expect(tableUpsert).toHaveBeenCalledWith({
+      id: '5',
+      asset_name: 'Ladder',
+      description: 'Aluminium ladder',
+      recorded_at: '2026-07-25T10:00:00.000Z',
+      photo_path: null,
+      condition: null,
+      condition_note: null,
+    });
+    expect(markAssetSyncedMock).toHaveBeenCalledWith('5');
+    expect(result).toEqual({ succeeded: ['5'], failed: [] });
   });
 
   it('skips the photo upload when the asset has no photo', async () => {
