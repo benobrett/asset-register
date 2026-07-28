@@ -117,6 +117,44 @@ test('leaves the underlying view and scroll position untouched', async ({ page }
   expect(await page.evaluate(() => window.scrollY)).toBe(scrollBefore);
 });
 
+// detail.js's repair Information/Comment handlers call stopPropagation(),
+// so a bubble-phase outside-click listener never sees these clicks and the
+// popover would sit open on top of the panel they just opened.
+test('closes on an outside click that stops propagation', async ({ page }) => {
+  const assetName = `E2E profile stopprop asset ${Date.now()}`;
+  const supabase = await createTestSupabaseClient();
+  const { data: asset, error } = await supabase
+    .from('assets')
+    .insert({ asset_name: assetName, description: 'Seeded for the profile-menu stopPropagation e2e test.' })
+    .select()
+    .single();
+  if (error) throw error;
+
+  const { error: repairError } = await supabase.from('asset_repairs').insert({
+    asset_id: asset.id,
+    description: 'Seeded repair.',
+    created_by_email: 'seed@example.com',
+  });
+  if (repairError) throw repairError;
+
+  try {
+    await page.goto(`/#/asset/${asset.id}`);
+
+    const button = page.getByRole('button', { name: PROFILE_BUTTON });
+    const popover = page.getByRole('dialog', { name: 'Your profile' });
+    const repairItem = page.getByRole('listitem').filter({ hasText: 'Seeded repair.' });
+
+    await expect(repairItem.getByRole('button', { name: 'Information' })).toBeVisible();
+    await button.click();
+    await expect(popover).toBeVisible();
+
+    await repairItem.getByRole('button', { name: 'Information' }).click();
+    await expect(popover).toBeHidden();
+  } finally {
+    await supabase.from('assets').delete().eq('id', asset.id);
+  }
+});
+
 test('a confirm dialog closes the popover rather than opening behind it', async ({ page }) => {
   // The register's quick-delete button only renders in the card list (see
   // #67), which needs a phone-width viewport.

@@ -95,13 +95,26 @@ export function mountProfileMenu(host, { navigate }) {
     }
   });
 
-  // Capture-phase document listeners rather than per-open wiring: one
-  // pair for the component's whole life, no add/remove churn to leak.
-  document.addEventListener('click', (event) => {
-    if (!open) return;
-    if (host.contains(event.target)) return;
-    close();
-  });
+  // Document-level and wired once for the component's whole life, rather
+  // than added and removed around each open - nothing to leak.
+  //
+  // Capture phase specifically, because bubble phase isn't reliable here:
+  // detail.js's repair Information/Comment handlers call
+  // stopPropagation(), so those clicks would never reach a bubble-phase
+  // listener on document, and the popover would sit open on top of the
+  // panel they just opened. Capture runs before the target's own handler,
+  // so it can't be cut off that way. Clicks on the chrome itself (the
+  // toggle button, or inside the popover) are excluded below and left to
+  // their own handlers.
+  document.addEventListener(
+    'click',
+    (event) => {
+      if (!open) return;
+      if (host.contains(event.target)) return;
+      close();
+    },
+    true
+  );
 
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') close({ restoreFocus: true });
