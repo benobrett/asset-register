@@ -36,7 +36,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          # Full history, not the upstream example's fetch-depth: 1 - the
+          # code-review skill diffs against the PR's base branch, and a
+          # depth-1 checkout has no base-branch history at all to diff
+          # against. Confirmed directly: with depth 1, the review ran to
+          # completion (real cost, real turns) but silently found and
+          # posted nothing.
+          fetch-depth: 0
 
       - name: Run Claude code review
         uses: anthropics/claude-code-action@v1
