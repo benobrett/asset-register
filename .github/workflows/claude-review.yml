@@ -1,0 +1,49 @@
+name: Claude Code Review
+
+# Advisory only - never a required check (see branch protection settings,
+# which only require ci.yml's test/e2e jobs). A failed or slow AI review
+# should never be able to block a merge the way a flaky API call could.
+on:
+  pull_request:
+    types: [opened, synchronize]
+    # A docs-only change doesn't need a code review.
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+
+permissions:
+  contents: read
+  pull-requests: write
+  # Needed for the action's own OIDC-based auth against the installed
+  # GitHub App - without it, claude-code-action@v1 fails immediately with
+  # "Could not fetch an OIDC token" before it ever gets to reviewing
+  # anything (confirmed directly: this is required, not just for reading
+  # CI results as some upstream examples' comments suggest).
+  id-token: write
+
+# A new push to the same PR cancels whatever review was already running for
+# it - three commits in quick succession shouldn't trigger three overlapping
+# reviews.
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude code review
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          plugin_marketplaces: "https://github.com/anthropics/claude-code.git"
+          plugins: "code-review@claude-code-plugins"
+          prompt: "/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
+          claude_args: |
+            --max-turns 30
