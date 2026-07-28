@@ -5,7 +5,7 @@
 // popover would vanish mid-interaction, and every new view would be a
 // fresh chance to forget to include the icon at all.
 
-import { getCachedProfileName } from './auth.js';
+import { getCachedProfileName, signOut } from './auth.js';
 import { formatInitials, formatDisplayName } from './format.js';
 
 // Anonymous outline rather than initials-from-email: an account with no
@@ -37,7 +37,7 @@ function escapeHtml(value) {
   return div.innerHTML.replaceAll('"', '&quot;').replaceAll("'", '&#39;');
 }
 
-export function mountProfileMenu(host) {
+export function mountProfileMenu(host, { navigate }) {
   host.innerHTML = `
     <button
       type="button"
@@ -50,12 +50,16 @@ export function mountProfileMenu(host) {
     ></button>
     <div class="profile-popover" id="profile-popover" role="dialog" aria-label="Your profile" hidden>
       <p class="profile-popover-name" id="profile-popover-name"></p>
+      <button type="button" class="link-button profile-logout-button" id="profile-logout">
+        Log out
+      </button>
     </div>
   `;
 
   const button = host.querySelector('#profile-button');
   const popover = host.querySelector('#profile-popover');
   const nameEl = host.querySelector('#profile-popover-name');
+  const logoutButton = host.querySelector('#profile-logout');
 
   let open = false;
 
@@ -75,6 +79,21 @@ export function mountProfileMenu(host) {
   }
 
   button.addEventListener('click', () => setOpen(!open));
+
+  // Sits here rather than in a view's own header, which is where it used
+  // to live: on the register screen only, so it wasn't reachable at all
+  // from capture or detail. As persistent chrome it's available on every
+  // authenticated screen. Navigating to #/login re-enters route(), which
+  // hides this whole element - no need to close it by hand first.
+  logoutButton.addEventListener('click', async () => {
+    logoutButton.disabled = true;
+    try {
+      await signOut();
+      navigate('#/login');
+    } finally {
+      logoutButton.disabled = false;
+    }
+  });
 
   // Capture-phase document listeners rather than per-open wiring: one
   // pair for the component's whole life, no add/remove churn to leak.

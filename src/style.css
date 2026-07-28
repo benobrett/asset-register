@@ -167,6 +167,26 @@ body {
   overflow-wrap: anywhere;
 }
 
+/* Separated from the name above by a rule, so the one actionable thing
+   in here reads as an action rather than more profile detail. Keeps the
+   existing .link-button language rather than inventing a new one - this
+   is the same control that used to sit in the register's own header.
+
+   Deliberately two classes deep: .link-button is defined further down
+   this file and sets border-color: transparent and its own padding, so
+   at equal specificity it would win on source order and erase the
+   separator below. This way the profile styles stay grouped together up
+   here without depending on where .link-button happens to sit. */
+.profile-popover .profile-logout-button {
+  display: block;
+  width: 100%;
+  margin-top: 0.7rem;
+  padding: 0.5rem 0 0;
+  border-top: 1px solid var(--color-border);
+  border-radius: 0;
+  text-align: left;
+}
+
 h1 {
   font-size: 1.25rem;
   margin: 0;

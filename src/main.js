@@ -14,7 +14,7 @@ const app = document.getElementById('app');
 // Mounted once, outside #app, so it survives every view re-render - see
 // CLAUDE.md "Persistent chrome". route() only ever updates its
 // visibility and contents; it is never re-created.
-const updateProfileMenu = mountProfileMenu(document.getElementById('app-chrome'));
+const updateProfileMenu = mountProfileMenu(document.getElementById('app-chrome'), { navigate });
 
 const routes = [
   { pattern: /^#\/login$/, view: renderLogin, public: true },

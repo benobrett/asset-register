@@ -20,10 +20,12 @@ test('opens and closes on click, outside click, Escape, and route change', async
   await expect(popover).toContainText('Test User');
   await expect(button).toHaveAttribute('aria-expanded', 'true');
 
-  // Read-only: the popover offers no way to change anything.
-  await expect(popover.getByRole('button')).toHaveCount(0);
-  await expect(popover.getByRole('link')).toHaveCount(0);
+  // The profile data itself stays read-only - Log out is an action, not
+  // a way to edit a name. No form field, no link to the edit gate.
   await expect(popover.getByRole('textbox')).toHaveCount(0);
+  await expect(popover.getByRole('link')).toHaveCount(0);
+  await expect(popover.getByRole('button')).toHaveCount(1);
+  await expect(popover.getByRole('button', { name: 'Log out' })).toBeVisible();
 
   // A second click on the icon closes it again.
   await button.click();
@@ -43,11 +45,18 @@ test('opens and closes on click, outside click, Escape, and route change', async
   await expect(popover).toBeHidden();
   await expect(button).toBeFocused();
 
-  // Route change.
-  await button.click();
-  await expect(popover).toBeVisible();
+  // Route change. Triggered from the capture screen's top-left back
+  // button: an open popover legitimately covers the content beneath it
+  // (including the register's "Add New Asset"), and a click there
+  // dismisses the popover rather than passing through to what's under
+  // it - normal popover behaviour, but it would conflate dismissal with
+  // the navigation this step is actually about.
   await page.getByRole('button', { name: 'Add New Asset' }).click();
   await expect(page).toHaveURL(/#\/capture$/);
+  await button.click();
+  await expect(popover).toBeVisible();
+  await page.getByRole('button', { name: '← Assets' }).click();
+  await expect(page).toHaveURL(/#\/register$/);
   await expect(popover).toBeHidden();
 });
 
@@ -148,6 +157,34 @@ test('a confirm dialog closes the popover rather than opening behind it', async 
 
 test.describe('visibility', () => {
   test.use({ storageState: { cookies: [], origins: [] } });
+
+  // Logging out mutates the shared storage state, so it belongs in this
+  // signed-out block with its own session rather than leaking a logged-out
+  // state into the tests above.
+  test('logs out from the popover, from any screen', async ({ page }) => {
+    await page.goto('/#/login');
+    await page.getByLabel('Email').fill(process.env.E2E_TEST_EMAIL);
+    await page.getByLabel('Password').fill(process.env.E2E_TEST_PASSWORD);
+    await page.getByRole('button', { name: 'Log in' }).click();
+    await expect(page).toHaveURL(/#\/register$/);
+
+    // Deliberately not the register: logout used to live in that view's
+    // own header and was unreachable from anywhere else. As chrome it
+    // has to work here too.
+    await page.getByRole('button', { name: 'Add New Asset' }).click();
+    await expect(page).toHaveURL(/#\/capture$/);
+
+    await page.getByRole('button', { name: PROFILE_BUTTON }).click();
+    await page.getByRole('button', { name: 'Log out' }).click();
+
+    await expect(page).toHaveURL(/#\/login$/);
+    await expect(page.getByRole('button', { name: PROFILE_BUTTON })).toHaveCount(0);
+
+    // Genuinely signed out, not just navigated away - a protected route
+    // bounces straight back to the login screen.
+    await page.goto('/#/register');
+    await expect(page).toHaveURL(/#\/login$/);
+  });
 
   test('is hidden on the login screen and shown once signed in', async ({ page }) => {
     await page.goto('/#/login');

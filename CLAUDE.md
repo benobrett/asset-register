@@ -56,7 +56,7 @@ Built on Windows, running on a Chromebook (ChromeOS/Chrome) in the field. Being 
 │   ├── validation.js        Pure, unit-tested form-validation logic
 │   ├── format.js            Small display-formatting helpers (the "Item-01" asset ID, condition labels/rank, profile initials + display-name fallback)
 │   ├── confirmDialog.js     Promise-based confirm/cancel modal (see "View pattern" below)
-│   ├── profileMenu.js       Persistent profile icon + read-only popover (see "Persistent chrome" below)
+│   ├── profileMenu.js       Persistent profile icon + popover (name, and the app's only Log out) — see "Persistent chrome" below
 │   ├── assets/              Logo + font, imported from JS/CSS (not referenced from public/) so Vite base-prefixes them correctly under GitHub Pages' subpath
 │   ├── views/
 │   │   ├── login.js           Login, and signup (first name, last name, email, password, in that order)
@@ -94,7 +94,7 @@ There's no component framework, so every view follows the same shape: a function
 `confirmDialog({ message })` is the one shared UI primitive outside this pattern: it builds its own backdrop/modal, appends it to `document.body` directly (not into a view's `container`), and returns a Promise that resolves `true` on confirm or `false` on cancel/backdrop-click/Escape. Views awaiting it don't need to render or tear down anything themselves.
 
 ### Persistent chrome
-`index.html` has a second top-level element beside `#app`: `<header id="app-chrome">`, which `main.js` mounts `profileMenu.js` into **once**, at startup. `route()` then only ever calls the updater it returns — it never re-creates it.
+`index.html` has a second top-level element beside `#app`: `<header id="app-chrome">`, which `main.js` mounts `profileMenu.js` into **once**, at startup. `route()` then only ever calls the updater it returns — it never re-creates it. The popover shows the signed-in user's name (read-only — there's no edit affordance) and holds **the app's only Log out button**; it used to sit in `register.js`'s own `.view-header`, where it wasn't reachable from the capture or detail screens at all.
 
 **Anything persistent across views has to live here, not inside a view.** The view pattern above rewrites a view's whole container on every re-render, so UI rendered inside one is destroyed and rebuilt whenever that view redraws (opening an edit form, expanding a comment thread). For the profile menu that would mean an open popover vanishing mid-interaction and focus being lost; it would also make every new view a fresh chance to forget to include it. Add to the chrome element instead — and keep it out of `src/views/`, which is for routes.
 
