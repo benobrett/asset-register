@@ -50,6 +50,12 @@ jobs:
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.E2E_SUPABASE_PUBLISHABLE_KEY }}
           E2E_TEST_EMAIL: ${{ secrets.E2E_TEST_EMAIL }}
           E2E_TEST_PASSWORD: ${{ secrets.E2E_TEST_PASSWORD }}
+          # A second account, deliberately left with no name on file, so
+          # auth-gates.spec.js can sign in as an account whose profile is
+          # incomplete - the shared test account above always has a name,
+          # and RLS forbids resetting one once set (see CLAUDE.md).
+          E2E_INCOMPLETE_PROFILE_EMAIL: ${{ secrets.E2E_INCOMPLETE_PROFILE_EMAIL }}
+          E2E_INCOMPLETE_PROFILE_PASSWORD: ${{ secrets.E2E_INCOMPLETE_PROFILE_PASSWORD }}
       - name: Upload Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@v4
