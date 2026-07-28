@@ -185,7 +185,7 @@ Using `<input type="file" accept="image/*" capture="environment">` rather than a
 ## Environment variables
 `.env` (gitignored) holds `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`. Vite exposes these to client code via `import.meta.env`. `.env.example` documents both names with empty values — copy it to `.env` and fill them in.
 
-`.env.e2e` (gitignored) is the same two keys plus `E2E_TEST_EMAIL`/`E2E_TEST_PASSWORD`, pointed at a **separate** Supabase project — see "Testing conventions" for why this can't just reuse `.env`. `.env.e2e.example` documents it the same way.
+`.env.e2e` (gitignored) is the same two keys plus `E2E_TEST_EMAIL`/`E2E_TEST_PASSWORD` and `E2E_INCOMPLETE_PROFILE_EMAIL`/`E2E_INCOMPLETE_PROFILE_PASSWORD`, pointed at a **separate** Supabase project — see "Testing conventions" for why this can't just reuse `.env`. `.env.e2e.example` documents it the same way.
 
 ## Testing conventions
 **Vitest** (`tests/`) covers pure logic — validation, formatting, the offline queue. **Playwright** (`e2e/`) covers user-facing flows end to end in a real (Chromium) browser. Any PR that adds or changes a user-facing flow includes or updates an e2e spec; a bug fix to an existing flow should add the spec that would have caught the bug. Pure-logic changes need Vitest only.
@@ -200,7 +200,8 @@ Using `<input type="file" accept="image/*" capture="environment">` rather than a
 ### Playwright (e2e)
 - Specs live in `e2e/`, one flow per file, named after the flow. Run with `npm run test:e2e` (`npm run test:e2e:ui` for the debugging UI).
 - **Runs against the production bundle**, not the dev server: `playwright.config.js`'s `webServer` runs `npm run build:e2e && npm run preview`. This matters because `vite-plugin-pwa`'s service worker behaves differently in a dev build, and the production bundle is what actually ships.
-- **A separate Supabase project from `.env`**, via `.env.e2e` (`npm run build:e2e` is `vite build --mode e2e`, which loads it). Specs create real assets/repairs/comments, and this app's RLS makes every one of those visible to every logged-in user — pointed at production, a test run would steadily fill the real register with junk that field staff then see. In CI there's no `.env.e2e` file at all; the same variable names are injected directly as job env from repository secrets (`E2E_SUPABASE_URL`, `E2E_SUPABASE_PUBLISHABLE_KEY`, `E2E_TEST_EMAIL`, `E2E_TEST_PASSWORD`), which Vite picks up the same way regardless of mode.
+- **A separate Supabase project from `.env`**, via `.env.e2e` (`npm run build:e2e` is `vite build --mode e2e`, which loads it). Specs create real assets/repairs/comments, and this app's RLS makes every one of those visible to every logged-in user — pointed at production, a test run would steadily fill the real register with junk that field staff then see. In CI there's no `.env.e2e` file at all; the same variable names are injected directly as job env from repository secrets (`E2E_SUPABASE_URL`, `E2E_SUPABASE_PUBLISHABLE_KEY`, `E2E_TEST_EMAIL`, `E2E_TEST_PASSWORD`, `E2E_INCOMPLETE_PROFILE_EMAIL`, `E2E_INCOMPLETE_PROFILE_PASSWORD`), which Vite picks up the same way regardless of mode.
+- **A second dedicated account, `E2E_INCOMPLETE_PROFILE_EMAIL`/`PASSWORD`**, deliberately left with no name on file (created the same way as the main test account — see `migrations/e2e-seed-test-user.sql` — but never seeded). `auth-gates.spec.js` uses it to test the `#/complete-profile` gate: the main test account always has a name, and `profiles`' RLS forbids ever resetting one once set, so that scenario can't be produced from a fresh `signUp()` call either — the e2e project requires email confirmation, so a freshly-signed-up account has no session to test with until confirmed. **Never submit the complete-profile form for this account in any spec** — doing so sets its name permanently, via a change no client-side call can undo.
 - **Auth is done once, not per spec**: a `setup` project (`e2e/auth.setup.js`) logs in and saves `storageState` to `e2e/.auth/user.json` (gitignored); the `chromium` project depends on it and reuses that state. `login.spec.js` is the one place that needs to start logged out, so it overrides `storageState` back to empty per-test.
 - **Locate by role, label, and visible text — never CSS classes.** Views here re-render by rewriting their own HTML from scratch (see "View pattern"), so a class-based selector breaks on unrelated refactors that don't change what the user actually sees. This is the main source of flakiness to design against.
 - **No fixed `waitForTimeout` sleeps.** Rely on Playwright's auto-waiting and `expect.poll()` (used to wait for a record to reach Supabase after reconnecting) instead — a fixed sleep in an offline-sync app is either too short and flaky or too long and slow.
@@ -259,6 +260,8 @@ jobs:
           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.E2E_SUPABASE_PUBLISHABLE_KEY }}
           E2E_TEST_EMAIL: ${{ secrets.E2E_TEST_EMAIL }}
           E2E_TEST_PASSWORD: ${{ secrets.E2E_TEST_PASSWORD }}
+          E2E_INCOMPLETE_PROFILE_EMAIL: ${{ secrets.E2E_INCOMPLETE_PROFILE_EMAIL }}
+          E2E_INCOMPLETE_PROFILE_PASSWORD: ${{ secrets.E2E_INCOMPLETE_PROFILE_PASSWORD }}
       - name: Upload Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@v4
