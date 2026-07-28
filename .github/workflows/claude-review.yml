@@ -41,7 +41,12 @@ jobs:
       - name: Run Claude code review
         uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # A deliberate deviation from the issue's original design (which
+          # specified ANTHROPIC_API_KEY, billed as separate API credits):
+          # /install-github-app already set up CLAUDE_CODE_OAUTH_TOKEN, so
+          # this bills against the Claude subscription's usage instead -
+          # no separate API key to obtain or rotate.
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           plugin_marketplaces: "https://github.com/anthropics/claude-code.git"
           plugins: "code-review@claude-code-plugins"
           prompt: "/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
