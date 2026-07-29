@@ -164,11 +164,6 @@ test.describe('search, sort, and the outstanding-repairs filter', () => {
 test('deletes an asset, showing the repair-count confirmation and cascading its repairs', async ({
   page,
 }) => {
-  // The register view's quick-delete button only renders in the card-list
-  // markup, not the table row - a narrow viewport is what actually makes
-  // it visible/clickable (see CLAUDE.md's responsive layout note).
-  await page.setViewportSize({ width: 480, height: 800 });
-
   const assetName = `E2E delete asset ${Date.now()}`;
   const supabase = await createTestSupabaseClient();
 
@@ -179,29 +174,14 @@ test('deletes an asset, showing the repair-count confirmation and cascading its 
     .single();
   if (error) throw error;
 
-  // Both repairs completed, not outstanding - filed #67 for a real bug:
-  // the delete button only reveals on hover/focus (unreachable by touch
-  // at all) and, when an asset HAS an outstanding repair, the "Repair
-  // logged" badge visually overlaps and intercepts clicks meant for it.
-  // Sidestepping that here since it's a UX decision, not an e2e-coverage
-  // one - this still exercises the repair-count confirmation and cascade,
-  // just not through an overlapping badge.
-  const completedAt = new Date().toISOString();
+  // Outstanding, not completed. The old version of this test had to use
+  // completed repairs to dodge #67, where the "🔧 Repair logged" badge
+  // overlapped the register's delete button and swallowed its clicks.
+  // Deleting now happens on the asset's own page, so the badge is
+  // irrelevant and the more realistic case is testable again.
   const { error: repairsError } = await supabase.from('asset_repairs').insert([
-    {
-      asset_id: asset.id,
-      description: 'First repair.',
-      created_by_email: 'seed@example.com',
-      completed_at: completedAt,
-      completed_by_email: 'seed@example.com',
-    },
-    {
-      asset_id: asset.id,
-      description: 'Second repair.',
-      created_by_email: 'seed@example.com',
-      completed_at: completedAt,
-      completed_by_email: 'seed@example.com',
-    },
+    { asset_id: asset.id, description: 'First repair.', created_by_email: 'seed@example.com' },
+    { asset_id: asset.id, description: 'Second repair.', created_by_email: 'seed@example.com' },
   ]);
   if (repairsError) throw repairsError;
 
@@ -210,30 +190,26 @@ test('deletes an asset, showing the repair-count confirmation and cascading its 
     await page.goto('/#/register');
     await page.getByPlaceholder('Search assets…').fill(assetName);
 
-    // The delete button only becomes clickable on :hover/:focus-within
-    // (see #67), and starts pointer-events: none - meaning it can't even
-    // be hovered as its OWN target (nothing to hit-test until it's
-    // already visible). A real mouse doesn't need to: moving anywhere
-    // over the row triggers the ancestor's :hover, which is what
-    // actually reveals it - so hover the row itself first, then click
-    // the now-visible button.
-    const row = page.locator('.asset-list-item').filter({ hasText: assetName });
-    const deleteButton = page.getByRole('button', { name: `Delete ${assetName}` });
-
     // Wait for the debounced search to have actually rendered its result
-    // before touching anything. Otherwise its 250ms timer can still be
-    // pending, fire mid-delete, and blank the list to "Loading…" - which
-    // makes the post-delete "row is gone" assertion pass for the wrong
-    // reason, before the delete has even completed.
+    // before touching anything - its 250ms timer can otherwise still be
+    // pending and re-render the list out from under the click.
+    const row = page.getByRole('row', { name: assetName });
     await expect(row).toHaveCount(1);
 
-    await row.hover();
-    await deleteButton.click();
+    // Deleting lives on the asset's own page (#67): a destructive action
+    // sitting one stray tap away in a scanning list was both unreachable
+    // by touch and easy to hit by accident.
+    await row.click();
+    await expect(page).toHaveURL(/#\/asset\//);
 
+    await page.getByRole('button', { name: 'Delete asset' }).click();
     await expect(page.locator('.modal-message')).toContainText('2 repair records');
     await page.getByRole('button', { name: 'Delete', exact: true }).click();
 
-    await expect(row).toHaveCount(0);
+    // Back to the register, with the asset gone from it.
+    await expect(page).toHaveURL(/#\/register$/);
+    await page.getByPlaceholder('Search assets…').fill(assetName);
+    await expect(page.getByRole('row', { name: assetName })).toHaveCount(0);
     deleted = true;
 
     const { data: remainingAsset } = await supabase.from('assets').select('id').eq('id', asset.id);

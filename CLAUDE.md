@@ -30,9 +30,11 @@ Bug fixes and UI changes that don't alter any of the above don't need an update.
 2. **Name prompt, if needed** — an account that reaches this point with no name on file (a pre-existing account, or a future non-form sign-in path) is blocked here until it provides one. See "Routing and auth/profile gates".
 3. **Assets** (`#/register`) — the landing screen after login. Search/browse/sort the register, or start a new asset.
 4. **New asset** (`#/capture`) — photo + details, with any repairs already known about it.
-5. **Asset detail** (`#/asset/:id`) — view/edit an asset, and its full repair log: add a repair, edit it, mark it complete, and discuss it in a per-repair comment thread.
+5. **Asset detail** (`#/asset/:id`) — view/edit an asset, and its full repair log: add a repair, edit it, mark it complete, and discuss it in a per-repair comment thread. **Deleting an asset happens here and nowhere else.**
 
 There is no separate "Home" screen — `#/register` is where every login lands.
+
+**The register is read-only** — it browses and navigates, it doesn't mutate. It briefly carried a per-row delete button, which turned out to be unusable on the device this app is actually for: it revealed only on `:hover`/`:focus-within`, and touch has no hover (with `pointer-events: none` until then, it couldn't even be tapped into existence). The desktop table layout never had one at all, so deleting was already effectively a detail-page action. Putting a destructive control one stray tap from a scanning list was also the wrong shape for a field device — the detail page makes it a deliberate step, and gives it room to name what's being destroyed ("…and its 2 repair records"). Don't reintroduce one without revisiting that.
 
 ## Development environment
 Built on Windows, running on a Chromebook (ChromeOS/Chrome) in the field. Being a PWA, this is mostly a non-issue — Chrome on Windows and Chrome on ChromeOS render identically — but a few things to keep in mind:
@@ -63,7 +65,7 @@ Built on Windows, running on a Chromebook (ChromeOS/Chrome) in the field. Being 
 │   │   ├── forgotPassword.js  Request a password reset email
 │   │   ├── resetPassword.js   Set a new password from the emailed recovery link
 │   │   ├── completeProfile.js Blocking post-login name prompt for an account with no name on file
-│   │   ├── register.js        Search/browse/sort the asset register; delete an asset
+│   │   ├── register.js        Search/browse/sort the asset register (read-only — deleting lives on the asset's own page)
 │   │   ├── capture.js         New asset form + photo capture
 │   │   └── detail.js          View/edit an asset; the repair + comment workflow
 │   └── style.css

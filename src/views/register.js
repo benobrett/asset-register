@@ -1,6 +1,5 @@
 import { supabase } from '../supabase.js';
 import { formatAssetId, formatCondition } from '../format.js';
-import { confirmDialog } from '../confirmDialog.js';
 import { getUnsyncedAssets } from '../db.js';
 
 const SORT_STORAGE_KEY = 'assetSort';
@@ -28,17 +27,6 @@ const SORT_OPTIONS = {
   // no repair records at all.
   repairs: { column: 'asset_name', ascending: true, repairsOnly: true },
 };
-
-const TRASH_ICON_SVG = `
-  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
-    stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-    <polyline points="3 6 5 6 21 6"></polyline>
-    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
-    <path d="M10 11v6"></path>
-    <path d="M14 11v6"></path>
-    <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path>
-  </svg>
-`;
 
 export function renderRegister(container, { navigate }) {
   container.innerHTML = `
@@ -160,9 +148,15 @@ export function renderRegister(container, { navigate }) {
       // A plain query rather than embedding assets->asset_repairs via
       // PostgREST's relationship syntax — that relies on its schema
       // cache recognizing the foreign key, which proved unreliable.
-      // Fetches every repair (not just outstanding ones) since the
-      // delete-confirmation message needs a total count per asset too.
-      withTimeout(supabase.from('asset_repairs').select('asset_id, completed_at'), { data: [] }),
+      // Outstanding repairs only: this view shows the "🔧 Repair logged"
+      // badge and filters on them, and nothing here needs a total any
+      // more now that the delete confirmation (which named a repair
+      // count) lives solely on the asset's own page. Less to pull over a
+      // field connection, too.
+      withTimeout(
+        supabase.from('asset_repairs').select('asset_id').is('completed_at', null),
+        { data: [] }
+      ),
       getUnsyncedAssets(),
     ]);
 
@@ -217,13 +211,11 @@ export function renderRegister(container, { navigate }) {
       return;
     }
 
+    // Every row the query returns is outstanding (it filters on
+    // completed_at), so this is a straight tally per asset.
     const outstandingCounts = new Map();
-    const totalCounts = new Map();
     for (const repair of repairsResult.data || []) {
-      totalCounts.set(repair.asset_id, (totalCounts.get(repair.asset_id) ?? 0) + 1);
-      if (!repair.completed_at) {
-        outstandingCounts.set(repair.asset_id, (outstandingCounts.get(repair.asset_id) ?? 0) + 1);
-      }
+      outstandingCounts.set(repair.asset_id, (outstandingCounts.get(repair.asset_id) ?? 0) + 1);
     }
 
     // Once every repair on an asset is marked completed it drops out —
@@ -258,33 +250,7 @@ export function renderRegister(container, { navigate }) {
     }
     for (const asset of displayData) {
       const outstandingCount = outstandingCounts.get(asset.id) ?? 0;
-      const totalCount = totalCounts.get(asset.id) ?? 0;
       const hasOutstandingRepair = outstandingCount > 0;
-
-      async function handleDelete(event, rowEl) {
-        event.stopPropagation();
-
-        const confirmed = await confirmDialog({
-          message: `Delete "${asset.asset_name}"? This will also delete its ${totalCount} repair record${totalCount === 1 ? '' : 's'}. This can't be undone.`,
-        });
-        if (!confirmed) return;
-
-        errorEl.hidden = true;
-        const { error: deleteError } = await supabase.from('assets').delete().eq('id', asset.id);
-        if (deleteError) {
-          errorEl.hidden = false;
-          errorEl.textContent = deleteError.message || 'Could not delete this asset.';
-          return;
-        }
-
-        rowEl.remove();
-        if (!listEl.children.length) {
-          const emptyMessage = sort.repairsOnly
-            ? 'No assets with repairs found.'
-            : 'No assets found.';
-          listEl.innerHTML = `<li class="asset-list-status">${emptyMessage}</li>`;
-        }
-      }
 
       const item = document.createElement('li');
       item.className = 'asset-list-item';
@@ -301,21 +267,10 @@ export function renderRegister(container, { navigate }) {
           </span>
           ${hasOutstandingRepair ? '<span class="repair-tag">🔧 Repair logged</span>' : ''}
         </button>
-        <button
-          type="button"
-          class="delete-asset-button"
-          data-id="${asset.id}"
-          aria-label="Delete ${escapeHtml(asset.asset_name)}"
-        >
-          ${TRASH_ICON_SVG}
-        </button>
       `;
       item.querySelector('.asset-list-button').addEventListener('click', () => {
         navigate(`#/asset/${asset.id}`);
       });
-      item
-        .querySelector('.delete-asset-button')
-        .addEventListener('click', (event) => handleDelete(event, item));
       listEl.appendChild(item);
 
       const row = document.createElement('tr');
