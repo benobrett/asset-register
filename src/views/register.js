@@ -147,7 +147,8 @@ export function renderRegister(container, { navigate }) {
       .order(sort.column, { ascending: sort.ascending });
 
     if (searchTerm) {
-      query = query.or(`asset_name.ilike.%${searchTerm}%,description.ilike.%${searchTerm}%`);
+      const pattern = toSearchPattern(searchTerm);
+      query = query.or(`asset_name.ilike.${pattern},description.ilike.${pattern}`);
     }
 
     // Fetched unconditionally (cheap, local-only, no network) so a
@@ -166,6 +167,21 @@ export function renderRegister(container, { navigate }) {
     ]);
 
     if (error) {
+      // A PostgREST rejection carries an error code; a dropped connection
+      // or our own timeout doesn't. Only the latter means "offline" -
+      // reporting a server-side rejection as one sends someone hunting
+      // for a signal problem that isn't there, which is exactly what a
+      // comma in the search box used to do.
+      if (error.code) {
+        listEl.innerHTML = '';
+        tableBodyEl.innerHTML = '';
+        errorEl.hidden = false;
+        errorEl.textContent = searchTerm
+          ? 'Could not search the register. Try a simpler search term.'
+          : 'Could not load the register. Please try again.';
+        return;
+      }
+
       // Offline (or otherwise unreachable) - show whatever's queued on
       // this device rather than nothing but an error banner. Necessarily
       // partial: only this device's own not-yet-synced assets, no repair
@@ -368,6 +384,34 @@ function renderConditionBadge(condition) {
   const label = formatCondition(condition);
   if (!label) return '';
   return `<span class="condition-tag condition-${condition}">${label}</span>`;
+}
+
+// Builds the ilike pattern for one search term. The term is user text
+// going into PostgREST's own filter grammar, where several characters
+// are syntax rather than data - typing a comma used to produce
+// "failed to parse logic tree" instead of results, because the comma
+// reads as the separator between the two or() conditions.
+//
+// Two layers of escaping, and they're easy to conflate:
+//   1. PostgREST: wrapping the value in double quotes lets it contain
+//      commas, dots and parentheses. Inside those quotes, \ and " have
+//      to be backslash-escaped.
+//   2. Postgres LIKE: % and _ are wildcards. Neutralising them needs a
+//      backslash that survives layer 1 - hence the doubled ones. A
+//      single \% is consumed by PostgREST and reaches LIKE as a bare %,
+//      still matching anything (verified against the real database).
+//
+// The point of neutralising the wildcards is parity: matchesSearch()
+// below does a plain substring test, and the two halves of the list
+// must agree about what a search term means.
+function toSearchPattern(searchTerm) {
+  const escaped = searchTerm
+    // First - later rules introduce backslashes of their own.
+    .replace(/\\/g, '\\\\\\\\')
+    .replace(/%/g, '\\\\%')
+    .replace(/_/g, '\\\\_')
+    .replace(/"/g, '\\"');
+  return `"%${escaped}%"`;
 }
 
 // A queued asset never went through the server-side ilike search the
