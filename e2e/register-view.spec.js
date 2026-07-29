@@ -18,7 +18,10 @@ test.describe('search, sort, and the outstanding-repairs filter', () => {
     // name-asc/desc sort differently from creation order, proving the
     // sort actually did something rather than just preserving insert order.
     const seed = [
-      { name: `${prefix} Zulu`, description: 'Squeaky wheelbarrow wheel.' },
+      // Punctuation and LIKE wildcards on purpose - the search test below
+      // relies on this description containing characters that are syntax
+      // to PostgREST (comma, parens) and wildcards to Postgres (%, _).
+      { name: `${prefix} Zulu`, description: 'Squeaky wheel (50% worn), 30_40cm rim.' },
       { name: `${prefix} Alpha`, description: 'Rusted gate hinge.' },
       { name: `${prefix} Mike`, description: 'Cracked plant pot.' },
     ];
@@ -67,6 +70,49 @@ test.describe('search, sort, and the outstanding-repairs filter', () => {
     await page.getByPlaceholder('Search assets…').fill('Rusted gate hinge');
     await expect(page.getByRole('row', { name: `${prefix} Alpha` })).toBeVisible();
     await expect(page.getByRole('row', { name: `${prefix} Zulu` })).toHaveCount(0);
+  });
+
+  // Several of these are syntax in PostgREST's filter grammar or
+  // wildcards in Postgres LIKE. A comma used to abort the query with
+  // "failed to parse logic tree", which the view then reported as being
+  // offline. Driven through the real UI and database, since the bug was
+  // entirely in how the two of them meet.
+  test('handles punctuation and wildcard characters in the search term', async ({ page }) => {
+    await page.goto('/#/register');
+    const search = page.getByPlaceholder('Search assets…');
+    const punctuated = page.getByRole('row', { name: `${prefix} Zulu` });
+    // Scoped to the table: both layouts always render, so the empty
+    // message exists twice in the DOM.
+    const noResults = page.locator('#asset-table-body').getByText('No assets found.');
+
+    // Searching is debounced by 250ms, so filling the box and asserting
+    // immediately can pass against the *previous* render - the query the
+    // fill triggers hasn't run yet. Every step below therefore moves
+    // between two visibly different states, so each assertion can only
+    // be satisfied by the search it's actually testing.
+    const searchFrom = async (settled, term) => {
+      await search.fill(settled);
+      await expect(noResults).toBeVisible();
+      await search.fill(term);
+    };
+
+    // Each of these is literally present in Zulu's description
+    // ("Squeaky wheel (50% worn), 30_40cm rim."), so each has to come
+    // back as a match rather than an error. The comma is the one that
+    // used to break the query outright.
+    for (const term of ['worn), 30', '(50% worn)', '30_40cm', 'wheel (50%']) {
+      await searchFrom('zzz-no-such-asset', term);
+      await expect(punctuated).toBeVisible();
+      await expect(page.getByRole('alert')).toBeHidden();
+    }
+
+    // ...and % must not act as a wildcard. "Z%u" is not literally in the
+    // name, so this has to find nothing - whereas an unescaped % would
+    // stand in for "ul" and match Zulu.
+    await search.fill(`${prefix} Zulu`);
+    await expect(punctuated).toBeVisible();
+    await search.fill(`${prefix} Z%u`);
+    await expect(noResults).toBeVisible();
   });
 
   test('sorts newest/oldest/name and applies the outstanding-repairs filter', async ({ page }) => {
