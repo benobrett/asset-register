@@ -70,49 +70,7 @@ test.describe('card list vs. table layout', () => {
   });
 });
 
-test('deletes an asset from the card list at phone width', async ({ page }) => {
-  // The table layout has no delete button at all (only the card-list <li>
-  // markup renders one) - see #67. Deletion is only reachable via the
-  // card list today, so this is the one layout the interaction can
-  // actually be tested in.
-  await page.setViewportSize(PHONE_VIEWPORT);
-
-  const deleteAssetName = `E2E responsive delete asset ${Date.now()}`;
-  const supabase = await createTestSupabaseClient();
-  const { data: asset, error } = await supabase
-    .from('assets')
-    .insert({
-      asset_name: deleteAssetName,
-      description: 'Created for the responsive-layout delete e2e test.',
-    })
-    .select()
-    .single();
-  if (error) throw error;
-
-  let deleted = false;
-  try {
-    await page.goto('/#/register');
-    await page.getByPlaceholder('Search assets…').fill(deleteAssetName);
-
-    // The delete button only reveals on :hover/:focus-within and starts
-    // pointer-events: none (see #67), so it can't be hovered as its own
-    // target - hover the row (like a real mouse moving across it would)
-    // instead.
-    const row = page.locator('.asset-list-item').filter({ hasText: deleteAssetName });
-    const deleteButton = page.getByRole('button', { name: `Delete ${deleteAssetName}` });
-
-    // Same reason as register-view.spec.js's delete test: let the
-    // debounced search render before acting, so its timer can't fire
-    // mid-delete and blank the list out from under the assertions.
-    await expect(row).toHaveCount(1);
-
-    await row.hover();
-    await deleteButton.click();
-
-    await page.getByRole('button', { name: 'Delete', exact: true }).click();
-    await expect(row).toHaveCount(0);
-    deleted = true;
-  } finally {
-    if (!deleted) await supabase.from('assets').delete().eq('id', asset.id);
-  }
-});
+// Deleting used to be card-list-only, which is what this file had a
+// delete test for. Since #67 it lives on the asset's own page, identical
+// at both widths, and is covered by register-view.spec.js - there's no
+// longer anything layout-specific about it to test here.

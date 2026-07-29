@@ -156,10 +156,6 @@ test('closes on an outside click that stops propagation', async ({ page }) => {
 });
 
 test('a confirm dialog closes the popover rather than opening behind it', async ({ page }) => {
-  // The register's quick-delete button only renders in the card list (see
-  // #67), which needs a phone-width viewport.
-  await page.setViewportSize({ width: 480, height: 800 });
-
   const assetName = `E2E profile modal asset ${Date.now()}`;
   const supabase = await createTestSupabaseClient();
   const { data: asset, error } = await supabase
@@ -170,19 +166,18 @@ test('a confirm dialog closes the popover rather than opening behind it', async 
   if (error) throw error;
 
   try {
-    await page.goto('/#/register');
-    await page.getByPlaceholder('Search assets…').fill(assetName);
+    // The asset's own page - since #67 that's where the delete
+    // confirmation (this test's source of a modal) lives.
+    await page.goto(`/#/asset/${asset.id}`);
 
     const button = page.getByRole('button', { name: PROFILE_BUTTON });
     const popover = page.getByRole('dialog', { name: 'Your profile' });
 
+    await expect(page.getByRole('button', { name: 'Delete asset' })).toBeVisible();
     await button.click();
     await expect(popover).toBeVisible();
 
-    // See #67 for why the row, not the button, is hovered.
-    const row = page.locator('.asset-list-item').filter({ hasText: assetName });
-    await row.hover();
-    await page.getByRole('button', { name: `Delete ${assetName}` }).click();
+    await page.getByRole('button', { name: 'Delete asset' }).click();
 
     await expect(page.getByRole('alertdialog')).toBeVisible();
     await expect(popover).toBeHidden();
