@@ -90,10 +90,13 @@ test('leaves the underlying view and scroll position untouched', async ({ page }
 
   // Baseline is taken only once the page has settled - the chrome is
   // revealed after route()'s async session check, and the register's rows
-  // arrive after their query, both of which change the page height on
-  // their own.
+  // arrive after their query, both of which change the page height (and
+  // so the maximum scroll) underneath the measurement. Waiting for
+  // "Loading…" to clear covers the rows without assuming the shared test
+  // database has any.
   await expect(button).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Assets' })).toBeVisible();
+  await expect(page.getByText('Loading…')).toHaveCount(0);
 
   await page.evaluate(() => window.scrollTo(0, 120));
   const scrollBefore = await page.evaluate(() => window.scrollY);
@@ -110,7 +113,14 @@ test('leaves the underlying view and scroll position untouched', async ({ page }
   await expect(popover).toBeVisible();
   expect(await page.evaluate(() => window.scrollY)).toBe(scrollBefore);
 
-  await button.click();
+  // Closed with Escape rather than a second click on the icon. Clicking
+  // it again is a fine thing for a user to do, but Playwright runs
+  // scrollIntoViewIfNeeded first, and for a position: sticky element that
+  // intermittently scrolls to where the element sits *in flow* - the top
+  // of the document - which is the harness moving the page, not the app.
+  // Escape exercises the same close path with nothing to scroll into
+  // view. (The click-to-close path itself is covered in the first test.)
+  await page.keyboard.press('Escape');
   await expect(popover).toBeHidden();
 
   await expect(page.locator('#app')).toHaveAttribute('data-untouched-marker', 'original');
