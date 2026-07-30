@@ -74,15 +74,33 @@ export function renderCapture(container, { navigate }) {
         </label>
         <p class="field-error" data-error-for="conditionNote" hidden></p>
 
-        <div id="repairs-section"></div>
+        <!-- capture-repairs, not the shared #repairs-section id, which
+             detail.js also uses for a section laid out quite differently.
+             Only this form needs the sub-panel treatment. -->
+        <div id="repairs-section" class="capture-repairs"></div>
 
         <p class="form-error" id="submit-error" role="alert" hidden></p>
-        <button type="submit">Save asset</button>
+        <div class="edit-actions">
+          <button type="submit">Save asset</button>
+          <!-- Lighter .link-button next to the primary action, the same
+               pairing detail.js's edit form already uses for Save/Cancel -
+               it reads as the secondary choice without needing a size of
+               its own. type="button" matters: inside a <form>, a button
+               with no type submits it. -->
+          <button type="button" id="cancel-capture" class="link-button">Cancel</button>
+        </div>
       </form>
     </section>
   `;
 
   container.querySelector('#back').addEventListener('click', () => navigate('#/register'));
+  // Same destination as the header's back button - two ways out of the
+  // form, one at the top and one beside the action you'd otherwise take.
+  // Neither warns about unsaved input, deliberately consistent with each
+  // other rather than one of them being stricter.
+  container
+    .querySelector('#cancel-capture')
+    .addEventListener('click', () => navigate('#/register'));
 
   const form = container.querySelector('#capture-form');
   const photoInput = form.photo;
