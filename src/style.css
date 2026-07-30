@@ -807,6 +807,33 @@ button[type='submit']:active {
   margin: 0;
 }
 
+/* Repairs on the capture form are a sub-section of it, not a peer of
+   the form's own actions - but "New repair" and "Save asset" are both
+   primary-styled buttons, so stacked a gap apart they read as two
+   equal choices. Grouping the whole repairs block into an inset panel
+   (the same surface-alt language #new-repair-form already uses) makes
+   the nesting visible, so "Save asset" clearly belongs to the form and
+   "New repair" to the panel. */
+.capture-repairs {
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+}
+
+.capture-repairs h2 {
+  margin: 0 0 0.75rem;
+  /* Down from the default h2 size: this titles a panel inside the form,
+     and at full size it competed with the "New asset" page heading. */
+  font-size: 1rem;
+}
+
+/* A little more than the form's own 1rem gap, so the submit row reads as
+   the end of the form rather than as the next item after the panel. */
+#capture-form > .edit-actions {
+  margin-top: 0.35rem;
+}
+
 #new-repair-form {
   display: flex;
   flex-direction: column;
@@ -816,6 +843,14 @@ button[type='submit']:active {
   border-radius: var(--radius-md);
   padding: 1rem;
   margin-top: 0.75rem;
+}
+
+/* Inside the panel above, surface-alt on surface-alt would flatten into
+   one indistinct block - white lifts the nested form back out. Scoped so
+   detail.js's copy, which sits on the page background, keeps its own
+   surface-alt fill. */
+.capture-repairs #new-repair-form {
+  background: var(--color-surface);
 }
 
 /* The `display: flex` above has higher specificity than the browser's

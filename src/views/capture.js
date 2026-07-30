@@ -74,7 +74,10 @@ export function renderCapture(container, { navigate }) {
         </label>
         <p class="field-error" data-error-for="conditionNote" hidden></p>
 
-        <div id="repairs-section"></div>
+        <!-- capture-repairs, not the shared #repairs-section id, which
+             detail.js also uses for a section laid out quite differently.
+             Only this form needs the sub-panel treatment. -->
+        <div id="repairs-section" class="capture-repairs"></div>
 
         <p class="form-error" id="submit-error" role="alert" hidden></p>
         <div class="edit-actions">
