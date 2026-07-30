@@ -50,6 +50,54 @@ test('a complete profile bounces #/complete-profile back to the register', async
   await expect(page).toHaveURL(/#\/register$/);
 });
 
+test.describe('concurrent routing', () => {
+  test.use({ storageState: { cookies: [], origins: [] } });
+
+  // route() reads the hash on entry and then awaits (the session lookup,
+  // and the profile query behind gate 4), so a call parked on one of
+  // those is still holding the hash it started with. Signing in kicks off
+  // two or three route() calls at once - a navigate() plus the SIGNED_IN
+  // event - and nothing serialises them, so an older one finishing last
+  // renders its stale hash over whatever the user has since navigated to.
+  //
+  // Forced deterministically here by making the first profile query far
+  // slower than the second, so the newer route finishes first and the
+  // older one wakes up behind it. Without the guard in main.js this ends
+  // on #/capture showing the Assets view (#83).
+  test('an older route does not render over a newer one', async ({ page }) => {
+    let profileQueries = 0;
+    await page.route('**/rest/v1/profiles**', async (route) => {
+      profileQueries += 1;
+      const delay = profileQueries === 1 ? 6000 : 100;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      await route.continue();
+    });
+
+    await page.goto('/#/login');
+    await page.getByLabel('Email').fill(process.env.E2E_TEST_EMAIL);
+    await page.getByLabel('Password').fill(process.env.E2E_TEST_PASSWORD);
+    await page.getByRole('button', { name: 'Log in' }).click();
+    await page.waitForFunction(() => location.hash === '#/register');
+
+    // Straight to the hash, with no actionability wait - the point is to
+    // land this while the sign-in's route() is still parked.
+    await page.evaluate(() => {
+      location.hash = '#/capture';
+    });
+
+    // The fast route renders #/capture almost immediately; the stale one
+    // only wakes up when its 6s query returns. Asserting as soon as
+    // "New asset" appears would therefore pass either way - the wait
+    // has to outlast that slow query for this to prove anything.
+    await expect(page.getByRole('heading', { name: 'New asset' })).toBeVisible({ timeout: 15000 });
+    await page.waitForTimeout(8000);
+
+    await expect(page).toHaveURL(/#\/capture$/);
+    await expect(page.getByRole('heading', { name: 'New asset' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Assets' })).toHaveCount(0);
+  });
+});
+
 test('a failed profile-completeness query fails open rather than blocking the app', async ({
   page,
 }) => {

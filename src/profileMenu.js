@@ -37,7 +37,7 @@ function escapeHtml(value) {
   return div.innerHTML.replaceAll('"', '&quot;').replaceAll("'", '&#39;');
 }
 
-export function mountProfileMenu(host, { navigate }) {
+export function mountProfileMenu(host) {
   host.innerHTML = `
     <button
       type="button"
@@ -83,13 +83,25 @@ export function mountProfileMenu(host, { navigate }) {
   // Sits here rather than in a view's own header, which is where it used
   // to live: on the register screen only, so it wasn't reachable at all
   // from capture or detail. As persistent chrome it's available on every
-  // authenticated screen. Navigating to #/login re-enters route(), which
-  // hides this whole element - no need to close it by hand first.
+  // authenticated screen.
+  //
+  // Deliberately does NOT navigate afterwards (#83). main.js's
+  // onAuthChange listener is the single source of truth for session
+  // transitions: SIGNED_OUT clears its cached session and re-runs
+  // route(), which sends the current (always protected - this menu is
+  // hidden on every public hash) route to #/login via gate 1.
+  //
+  // Navigating from here instead raced that listener. route() caches the
+  // session and only re-reads it when falsy, so it would run with the
+  // *old* session still cached, gate 2 ("session, and the hash is
+  // #/login") would fire, and the user landed back on #/register looking
+  // signed in while actually signed out on the server. That the cache
+  // self-heals in the other direction - null refreshes, stale doesn't -
+  // is exactly why signing in never showed the same symptom.
   logoutButton.addEventListener('click', async () => {
     logoutButton.disabled = true;
     try {
       await signOut();
-      navigate('#/login');
     } finally {
       logoutButton.disabled = false;
     }
