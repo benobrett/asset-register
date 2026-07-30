@@ -529,10 +529,64 @@ button[type='submit']:active {
   margin: -0.6rem 0 0;
 }
 
-#photo-preview {
-  max-width: 100%;
+/* Matches the <label> styling of the real fields around it - this one
+   titles a group of controls rather than labelling a single input, so it
+   can't be a <label> itself. */
+.photo-section-label {
+  margin: 0 0 -0.5rem;
+  font-weight: 600;
+}
+
+/* auto-fill with a fixed track, not auto-fit or percentages: the tiles
+   must stay the same size whatever the photo's aspect ratio or how many
+   there are, so adding a fourth doesn't resize the first three. Sized
+   generously - these are read at arm's length on a tablet, by staff who
+   won't thank us for desktop-sized thumbnails. */
+.photo-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 8.5rem);
+  gap: 0.75rem;
+}
+
+.photo-grid:empty {
+  display: none;
+}
+
+.photo-grid-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+/* Fixed box plus object-fit: cover, so a portrait and a landscape photo
+   occupy identical tiles and the grid never reflows as photos arrive. */
+.photo-thumb {
+  width: 8.5rem;
+  height: 8.5rem;
+  object-fit: cover;
   border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
   box-shadow: var(--shadow-sm);
+  background: var(--color-surface-alt);
+}
+
+/* Below the image with its own full-width hit area, rather than a small
+   badge floating over a corner of it - that is the easy thing to mis-tap
+   on a touchscreen, and mis-tapping this one costs a walk back to the
+   asset to re-photograph it. */
+.photo-grid-item .remove-photo-button {
+  width: 100%;
+  padding: 0.5rem 0.25rem;
+  text-align: center;
+  color: var(--color-danger);
+}
+
+.photo-grid-item .remove-photo-button:hover {
+  color: var(--color-danger-hover);
 }
 
 .asset-list {

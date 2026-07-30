@@ -5,6 +5,8 @@ import {
   validateNameForm,
   validatePassword,
   validatePasswordResetForm,
+  photoLimitReached,
+  MAX_ASSET_PHOTOS,
 } from '../src/validation.js';
 
 describe('validateAssetForm', () => {
@@ -220,5 +222,28 @@ describe('validatePasswordResetForm', () => {
     expect(result.valid).toBe(false);
     expect(result.errors.password).toBeDefined();
     expect(result.errors.confirmPassword).toBeUndefined();
+  });
+});
+
+describe('photoLimitReached', () => {
+  it('allows photos up to the maximum', () => {
+    expect(photoLimitReached(0)).toBe(false);
+    expect(photoLimitReached(MAX_ASSET_PHOTOS - 1)).toBe(false);
+  });
+
+  it('stops at the maximum', () => {
+    expect(photoLimitReached(MAX_ASSET_PHOTOS)).toBe(true);
+  });
+
+  // The shared edit policy means two people can each pass this check and
+  // between them produce more rows than the ceiling - the reading side
+  // has to tolerate that rather than break on it.
+  it('treats an over-limit count as still at the limit', () => {
+    expect(photoLimitReached(MAX_ASSET_PHOTOS + 1)).toBe(true);
+  });
+
+  it('treats a missing count as none', () => {
+    expect(photoLimitReached(undefined)).toBe(false);
+    expect(photoLimitReached(null)).toBe(false);
   });
 });

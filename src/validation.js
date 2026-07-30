@@ -1,5 +1,23 @@
 import { CONDITION_VALUES } from './format.js';
 
+// A serial plate, the damage, and the asset in situ are three different
+// photographs of the same thing - four leaves room without turning the
+// capture form into a gallery.
+//
+// Client-side only, deliberately: the shared "any logged-in user can edit
+// everything" policy means two people adding photos to the same asset at
+// once can both pass this and produce a fifth row. That's the same class
+// of problem as the last-write-wins limitation already documented for
+// offline edits, and the reading side tolerates it - see CLAUDE.md.
+export const MAX_ASSET_PHOTOS = 4;
+
+// Takes a count rather than a list so the capture screen (queued photos
+// only) and the detail screen (saved photos plus queued additions) can
+// share one implementation instead of each doing its own arithmetic.
+export function photoLimitReached(currentCount) {
+  return (currentCount ?? 0) >= MAX_ASSET_PHOTOS;
+}
+
 // Matches the check constraint on assets.condition_note in schema.sql -
 // suggested by design as long enough for a real note ("rust on the left
 // hinge, still closes fine") but short enough to stay a note, not a

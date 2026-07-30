@@ -2,42 +2,46 @@ import 'fake-indexeddb/auto';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   getUnsyncedAssets,
+  getUnsyncedPhotos,
+  getUnsyncedPhotosForAsset,
   getUnsyncedRepairs,
   getUnsyncedRepairComments,
   markAssetSynced,
+  markPhotoSynced,
   markRepairSynced,
   markRepairCommentSynced,
   queueAsset,
+  queuePhoto,
   queueRepair,
   queueRepairComment,
+  removeQueuedPhoto,
 } from '../src/db.js';
 
 afterEach(async () => {
   // Clear the stores between tests without deleting the database itself —
   // deleteDatabase() blocks on the open connection db.js keeps around,
   // which hangs indefinitely rather than actually closing it.
-  const request = indexedDB.open('asset-register', 3);
+  // Must track db.js's DB_VERSION: opening at a lower version than the
+  // one already open throws VersionError rather than downgrading.
+  const STORES = ['assets', 'repairs', 'repairComments', 'photos'];
+  const request = indexedDB.open('asset-register', 4);
   const rawDb = await new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
     request.onupgradeneeded = () => {
       const db = request.result;
-      if (!db.objectStoreNames.contains('assets')) {
-        db.createObjectStore('assets', { keyPath: 'id' });
-      }
-      if (!db.objectStoreNames.contains('repairs')) {
-        db.createObjectStore('repairs', { keyPath: 'id' });
-      }
-      if (!db.objectStoreNames.contains('repairComments')) {
-        db.createObjectStore('repairComments', { keyPath: 'id' });
+      for (const store of STORES) {
+        if (!db.objectStoreNames.contains(store)) {
+          db.createObjectStore(store, { keyPath: 'id' });
+        }
       }
     };
   });
   await new Promise((resolve, reject) => {
-    const tx = rawDb.transaction(['assets', 'repairs', 'repairComments'], 'readwrite');
-    tx.objectStore('assets').clear();
-    tx.objectStore('repairs').clear();
-    tx.objectStore('repairComments').clear();
+    const tx = rawDb.transaction(STORES, 'readwrite');
+    for (const store of STORES) {
+      tx.objectStore(store).clear();
+    }
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
@@ -130,5 +134,48 @@ describe('offline repair comment queue', () => {
 
     expect(await getUnsyncedRepairs()).toHaveLength(0);
     expect(await getUnsyncedRepairComments()).toHaveLength(1);
+  });
+});
+
+describe('offline photo queue', () => {
+  it('queues photos as unsynced and keeps them per asset', async () => {
+    await queuePhoto({ id: 'p1', assetId: 'a1', storagePath: 'u/1.jpg', position: 1 });
+    await queuePhoto({ id: 'p2', assetId: 'a1', storagePath: 'u/2.jpg', position: 2 });
+    await queuePhoto({ id: 'p3', assetId: 'a2', storagePath: 'u/3.jpg', position: 1 });
+
+    expect(await getUnsyncedPhotos()).toHaveLength(3);
+
+    const forA1 = await getUnsyncedPhotosForAsset('a1');
+    expect(forA1.map((p) => p.id).sort()).toEqual(['p1', 'p2']);
+  });
+
+  it('removes a photo from the pending list once marked synced', async () => {
+    await queuePhoto({ id: 'p1', assetId: 'a1', storagePath: 'u/1.jpg', position: 1 });
+    await markPhotoSynced('p1');
+
+    expect(await getUnsyncedPhotos()).toHaveLength(0);
+  });
+
+  // Dropping a photo that never reached the server is purely local -
+  // no row to delete and no Storage object to remove, so it works with
+  // no connection at all.
+  it('drops a queued photo without any network involvement', async () => {
+    await queuePhoto({ id: 'p1', assetId: 'a1', storagePath: 'u/1.jpg', position: 1 });
+    await queuePhoto({ id: 'p2', assetId: 'a1', storagePath: 'u/2.jpg', position: 2 });
+
+    await removeQueuedPhoto('p1');
+
+    const remaining = await getUnsyncedPhotos();
+    expect(remaining.map((p) => p.id)).toEqual(['p2']);
+  });
+
+  it('keeps the asset and photo queues independent', async () => {
+    await queueAsset({ id: 'a1', description: 'Chair' });
+    await queuePhoto({ id: 'p1', assetId: 'a1', storagePath: 'u/1.jpg', position: 1 });
+
+    await markPhotoSynced('p1');
+
+    expect(await getUnsyncedPhotos()).toHaveLength(0);
+    expect(await getUnsyncedAssets()).toHaveLength(1);
   });
 });
