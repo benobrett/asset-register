@@ -14,7 +14,7 @@ const app = document.getElementById('app');
 // Mounted once, outside #app, so it survives every view re-render - see
 // CLAUDE.md "Persistent chrome". route() only ever updates its
 // visibility and contents; it is never re-created.
-const updateProfileMenu = mountProfileMenu(document.getElementById('app-chrome'), { navigate });
+const updateProfileMenu = mountProfileMenu(document.getElementById('app-chrome'));
 
 const routes = [
   { pattern: /^#\/login$/, view: renderLogin, public: true },
@@ -49,12 +49,36 @@ let currentSession = null;
 // Set once route()'s own session check has resolved for the first time -
 // see the onAuthChange listener below for why this matters.
 let sessionCheckedOnce = false;
+// Bumped on every entry to route(), so a call that gets parked on an
+// await can tell it has been superseded - see isSuperseded below.
+let routeGeneration = 0;
 
 async function route() {
+  const generation = ++routeGeneration;
   const hash = window.location.hash || '#/register';
+
+  // route() reads the hash once, up front, and then awaits - the session
+  // lookup, and the profile check behind gate 4, which is a network
+  // query. If the hash changes while it's parked there, everything below
+  // is still working from the hash it captured on entry: it would render
+  // the *old* view over whatever the user has since navigated to, and
+  // update the chrome for a screen they're no longer on.
+  //
+  // Nothing serialises these either. Signing in fires a navigate() and a
+  // SIGNED_IN event, so two or three route() calls can be in flight at
+  // once, each holding a different hash; they finish in whatever order
+  // the profile cache and the network leave them in, and the last to
+  // finish wins regardless of which is current. Observed as an e2e
+  // failure where the register view (and a closed profile popover)
+  // appeared on top of #/capture.
+  //
+  // So: bail out the moment a newer route() has started. That one is
+  // working from the current hash and will render it.
+  const isSuperseded = () => generation !== routeGeneration;
 
   if (!currentSession) {
     currentSession = await getSession();
+    if (isSuperseded()) return;
   }
   sessionCheckedOnce = true;
 
@@ -85,15 +109,23 @@ async function route() {
     hash !== '#/reset-password' &&
     !(await isProfileComplete())
   ) {
+    if (isSuperseded()) return;
     window.location.hash = '#/complete-profile';
     return;
   }
+  // Checked even when the gate above wasn't taken: evaluating it still
+  // awaited the profile query, so the hash may have moved on regardless
+  // of which way it went.
+  if (isSuperseded()) return;
+
   // Nothing left to do there once the name's already on file - e.g. a
   // stale bookmark, or the back button, after already completing it.
   if (currentSession && hash === '#/complete-profile' && (await isProfileComplete())) {
+    if (isSuperseded()) return;
     window.location.hash = '#/register';
     return;
   }
+  if (isSuperseded()) return;
 
   // After the gates, before the view renders: the gates are the single
   // source of truth about whether there's a usable session, and gate 4
