@@ -714,6 +714,15 @@ button[type='submit']:active {
     max-width: 900px;
   }
 
+  /* Fields take the remaining width, photos take exactly what their two
+     fixed columns need - so the tiles never stretch and the details
+     never get squeezed into a narrow ribbon beside them. */
+  .asset-detail-layout {
+    grid-template-columns: 1fr auto;
+    gap: 1.5rem;
+    align-items: start;
+  }
+
   .asset-list {
     display: none;
   }
@@ -777,8 +786,22 @@ button[type='submit']:active {
   color: var(--color-text-muted);
 }
 
-.asset-detail-photos {
+/* Stacked by default. Two columns of 8.5rem tiles plus the gap is about
+   280px, which would leave the fields uncomfortably narrow on a phone -
+   so the side-by-side arrangement waits for the tablet breakpoint below,
+   the same width at which the register switches to its table. */
+.asset-detail-layout {
+  display: grid;
+  gap: 1rem;
   margin-bottom: 1rem;
+}
+
+/* Exactly two columns, so four photos read as two rows of two rather
+   than reflowing to whatever happens to fit. auto-fill (what the capture
+   form uses) would put all four on one row here on a wide screen. */
+.asset-detail-photos {
+  grid-template-columns: repeat(2, 8.5rem);
+  align-content: start;
 }
 
 /* The thumbnail is the button, so the whole tile is the tap target

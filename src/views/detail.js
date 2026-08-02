@@ -443,42 +443,47 @@ export async function renderDetail(container, { navigate, params }) {
   function drawView() {
     body.innerHTML = `
       <article class="asset-detail">
-        ${
-          photos.length
-            ? `<ul class="photo-grid asset-detail-photos">
-                ${photos
-                  .map(
-                    (photo, index) => `
-                  <li class="photo-grid-item">
-                    <button
-                      type="button"
-                      class="photo-thumb-button"
-                      data-photo-index="${index}"
-                      aria-label="View ${escapeHtml(photo.alt)}"
-                    >
-                      <img src="${escapeHtml(photo.url)}" alt="${escapeHtml(photo.alt)}" class="photo-thumb" />
-                    </button>
-                  </li>
-                `
-                  )
-                  .join('')}
-              </ul>`
-            : ''
-        }
-        <dl>
-          <dt>Asset ID</dt>
-          <dd>${formatAssetId(asset.asset_number)}</dd>
-          <dt>Asset name</dt>
-          <dd>${escapeHtml(asset.asset_name)}</dd>
-          <dt>Description</dt>
-          <dd>${escapeHtml(asset.description)}</dd>
-          <dt>Date/time</dt>
-          <dd>${new Date(asset.recorded_at).toLocaleString()}</dd>
-          <dt>Condition</dt>
-          <dd>${formatCondition(asset.condition) ?? 'Not set'}</dd>
-          <dt>Condition note</dt>
-          <dd>${asset.condition_note ? escapeHtml(asset.condition_note) : '—'}</dd>
-        </dl>
+        <!-- Fields first in the DOM, photos second, so they read in that
+             order for a screen reader and stack that way on a narrow
+             screen. The side-by-side arrangement is purely CSS. -->
+        <div class="asset-detail-layout">
+          <dl>
+            <dt>Asset ID</dt>
+            <dd>${formatAssetId(asset.asset_number)}</dd>
+            <dt>Asset name</dt>
+            <dd>${escapeHtml(asset.asset_name)}</dd>
+            <dt>Description</dt>
+            <dd>${escapeHtml(asset.description)}</dd>
+            <dt>Date/time</dt>
+            <dd>${new Date(asset.recorded_at).toLocaleString()}</dd>
+            <dt>Condition</dt>
+            <dd>${formatCondition(asset.condition) ?? 'Not set'}</dd>
+            <dt>Condition note</dt>
+            <dd>${asset.condition_note ? escapeHtml(asset.condition_note) : '—'}</dd>
+          </dl>
+          ${
+            photos.length
+              ? `<ul class="photo-grid asset-detail-photos">
+                  ${photos
+                    .map(
+                      (photo, index) => `
+                    <li class="photo-grid-item">
+                      <button
+                        type="button"
+                        class="photo-thumb-button"
+                        data-photo-index="${index}"
+                        aria-label="View ${escapeHtml(photo.alt)}"
+                      >
+                        <img src="${escapeHtml(photo.url)}" alt="${escapeHtml(photo.alt)}" class="photo-thumb" />
+                      </button>
+                    </li>
+                  `
+                    )
+                    .join('')}
+                </ul>`
+              : ''
+          }
+        </div>
         <p class="form-error" id="delete-error" role="alert" hidden></p>
         <div class="edit-actions">
           <button type="button" id="edit-button">Edit</button>
