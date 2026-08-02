@@ -60,7 +60,8 @@ test('edits condition and note from the asset detail page', async ({ page }) => 
     const assetDetail = page.getByRole('article');
     await expect(assetDetail.getByText('Not set')).toBeVisible();
 
-    await page.getByRole('button', { name: 'Edit' }).click();
+    // Exact, or this also matches "Edit photos" beside it.
+    await page.getByRole('button', { name: 'Edit', exact: true }).click();
     await page.getByLabel('Condition', { exact: true }).selectOption('good');
     await page.getByLabel('Condition note').fill('Recently serviced.');
     await page.getByRole('button', { name: 'Save' }).click();
