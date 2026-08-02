@@ -22,6 +22,26 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
 
 export const PHOTO_BUCKET = 'asset-photos';
 
+// Batched, so an asset with four photos costs one round trip instead of
+// four. Returns a Map of path -> signed URL; a path that couldn't be
+// signed is simply absent rather than throwing, so one bad row can't
+// stop the rest of an asset's photos from displaying.
+export async function getPhotoUrls(photoPaths, expiresInSeconds = 3600) {
+  const paths = [...new Set((photoPaths ?? []).filter(Boolean))];
+  if (!paths.length) return new Map();
+
+  const { data, error } = await supabase.storage
+    .from(PHOTO_BUCKET)
+    .createSignedUrls(paths, expiresInSeconds);
+  if (error) throw error;
+
+  return new Map(
+    (data ?? [])
+      .filter((entry) => entry.signedUrl && !entry.error)
+      .map((entry) => [entry.path, entry.signedUrl])
+  );
+}
+
 // Bucket isn't public (RLS gates everything else on login), so photos
 // are served via short-lived signed URLs rather than a public URL.
 export async function getPhotoUrl(photoPath, expiresInSeconds = 3600) {
