@@ -382,8 +382,6 @@ export function renderCapture(container, { navigate }) {
       const assetId = crypto.randomUUID();
       const recordedAtIso = new Date(recordedAt).toISOString();
 
-      // Paths are decided here, before anything is queued, so the asset
-      // record can carry the first one (see photoPath below).
       const photosToQueue = pendingPhotos.map((photo, index) => ({
         id: crypto.randomUUID(),
         assetId,
@@ -400,14 +398,8 @@ export function renderCapture(container, { navigate }) {
         assetName: assetName.trim(),
         description: description.trim(),
         recordedAt: recordedAtIso,
-        // The first photo's path, purely so clients still running the
-        // pre-multi-photo version show an image for assets created after
-        // this shipped - they read assets.photo_path and know nothing of
-        // asset_photos. Goes away with the column itself, in the
-        // follow-up that drops it. The blob is *not* attached here: the
-        // photos are queued separately below, and sending it twice would
-        // upload the same bytes twice.
-        photoPath: photosToQueue[0]?.storagePath ?? null,
+        // No photo on the asset record itself: the photos are queued
+        // separately below, as their own records.
         photo: null,
         condition,
         conditionNote,

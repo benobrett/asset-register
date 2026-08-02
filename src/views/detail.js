@@ -115,7 +115,7 @@ export async function renderDetail(container, { navigate, params }) {
   const [assetResult, repairsResult, currentUserProfile] = await Promise.all([
     supabase
       .from('assets')
-      .select('id, asset_number, asset_name, description, recorded_at, photo_path, condition, condition_note')
+      .select('id, asset_number, asset_name, description, recorded_at, condition, condition_note')
       .eq('id', params.id)
       .single(),
     supabase
@@ -328,20 +328,6 @@ export async function renderDetail(container, { navigate, params }) {
       // The row is already gone, so as far as the app is concerned the
       // photo has been removed. Nothing useful to tell the user here.
       console.error('Photo row deleted but its file could not be removed:', objectError);
-    }
-
-    // assets.photo_path still points at whatever the first photo was, and
-    // old clients render it directly (see CLAUDE.md) - left stale it
-    // would be a broken image for them rather than simply no image.
-    const remaining = photos
-      .filter((candidate) => candidate.id !== photo.id && !candidate.pending)
-      .sort((a, b) => a.position - b.position);
-    const { error: assetError } = await supabase
-      .from('assets')
-      .update({ photo_path: remaining[0]?.storagePath ?? null })
-      .eq('id', asset.id);
-    if (assetError) {
-      console.error('Could not update the legacy photo_path:', assetError);
     }
   }
 
@@ -1270,7 +1256,6 @@ export async function renderDetail(container, { navigate, params }) {
           assetName: assetName.trim(),
           description: description.trim(),
           recordedAt: new Date(recordedAt).toISOString(),
-          photoPath: asset.photo_path,
           photo: null,
           condition,
           conditionNote,

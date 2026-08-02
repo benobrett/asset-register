@@ -9,12 +9,8 @@ create table assets (
   asset_name text not null,
   description text not null,
   recorded_at timestamptz not null default now(),   -- the user-facing "Date/time" field: pre-populated client-side, editable
-  -- Superseded by asset_photos (an asset can have up to four photos).
-  -- Kept, and still written with the first photo's path, only so clients
-  -- running the pre-multi-photo version - the app shell is service-worker
-  -- cached, so they persist for a while after a deploy - keep showing an
-  -- image. Dropping it is a follow-up issue; see CLAUDE.md.
-  photo_path text,                                   -- object path in Supabase Storage
+  -- No photo column here: an asset's photos are rows in asset_photos.
+  -- A single photo_path lived here until 0005 dropped it.
   -- Current state only, both nullable - every asset that predates this
   -- feature has neither, and there's no sensible value to backfill.
   -- Stored lowercase ('good'/'ok'/'poor'); display casing is a client-side
