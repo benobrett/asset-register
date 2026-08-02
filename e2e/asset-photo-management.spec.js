@@ -100,15 +100,6 @@ test('adds a photo to a saved asset and deletes a synced one, row and file', asy
       .from(PHOTO_BUCKET)
       .download(removed.storage_path);
     expect(downloadError).not.toBeNull();
-
-    // The legacy photo_path pointed at the photo just deleted; left
-    // stale it would be a broken image on pre-multi-photo clients.
-    const { data: assetRow } = await supabase
-      .from('assets')
-      .select('photo_path')
-      .eq('id', assetId)
-      .single();
-    expect(assetRow.photo_path).toBe(remaining[0].storage_path);
   } finally {
     await supabase.from('assets').delete().eq('id', assetId);
   }

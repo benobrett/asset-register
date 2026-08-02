@@ -89,7 +89,6 @@ describe('syncQueuedAssets', () => {
       asset_name: 'Office chair 12',
       description: 'Office chair',
       recorded_at: '2026-07-25T10:00:00.000Z',
-      photo_path: 'user-1/1.jpg',
       condition: null,
       condition_note: null,
     });
@@ -118,7 +117,6 @@ describe('syncQueuedAssets', () => {
       asset_name: 'Wheelbarrow',
       description: 'Garden wheelbarrow',
       recorded_at: '2026-07-25T10:00:00.000Z',
-      photo_path: null,
       condition: 'poor',
       condition_note: 'Squeaky wheel, still usable.',
     });
@@ -147,7 +145,6 @@ describe('syncQueuedAssets', () => {
       asset_name: 'Ladder',
       description: 'Aluminium ladder',
       recorded_at: '2026-07-25T10:00:00.000Z',
-      photo_path: null,
       condition: null,
       condition_note: null,
     });
@@ -178,9 +175,11 @@ describe('syncQueuedAssets', () => {
     expect(storageUpload).toHaveBeenCalledWith('user-1/legacy.jpg', expect.any(Blob), {
       upsert: true,
     });
-    expect(tableUpsert).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'legacy-1', photo_path: 'user-1/legacy.jpg' })
-    );
+    // The asset row carries no path of its own any more - assets.photo_path
+    // is gone (migration 0005), and naming a column that doesn't exist is a
+    // 400 from PostgREST, not a field quietly ignored.
+    const assetUpsert = tableUpsert.mock.calls.find(([arg]) => arg.id === 'legacy-1')[0];
+    expect(assetUpsert).not.toHaveProperty('photo_path');
     expect(tableUpsert).toHaveBeenCalledWith({
       asset_id: 'legacy-1',
       storage_path: 'user-1/legacy.jpg',

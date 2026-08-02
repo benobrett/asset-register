@@ -46,18 +46,20 @@ test('adds an asset with a photo', async ({ page }) => {
 
   let photoPath;
   try {
+    // The path lives on the photo's own row - assets carries no photo
+    // column since 0005.
     await expect
       .poll(
         async () => {
           const { data } = await supabase
             .from('assets')
-            .select('photo_path')
+            .select('id, asset_photos(storage_path)')
             .eq('asset_name', assetName)
             .maybeSingle();
-          photoPath = data?.photo_path;
+          photoPath = data?.asset_photos?.[0]?.storage_path;
           return photoPath ?? null;
         },
-        { timeout: 15_000, message: 'asset with a photo_path never reached Supabase' }
+        { timeout: 15_000, message: 'asset with a photo never reached Supabase' }
       )
       .not.toBeNull();
 

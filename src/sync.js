@@ -40,7 +40,6 @@ export async function syncQueuedAssets() {
         asset_name: asset.assetName,
         description: asset.description,
         recorded_at: asset.recordedAt,
-        photo_path: asset.photoPath,
         // ?? null, not asset.condition directly - a record queued before
         // this field existed (the app shell is service-worker cached, so
         // an old queued record can still be sitting on a device when new

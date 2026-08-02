@@ -28,7 +28,7 @@ test('captures several photos and syncs them all', async ({ page }) => {
   try {
     const { data: asset } = await supabase
       .from('assets')
-      .select('id, photo_path')
+      .select('id')
       .eq('asset_name', assetName)
       .single();
     expect(asset).toBeTruthy();
@@ -52,10 +52,6 @@ test('captures several photos and syncs them all', async ({ page }) => {
       .eq('asset_id', asset.id)
       .order('position');
     expect(photos.map((p) => p.position)).toEqual([1, 2, 3]);
-
-    // Still written for clients running the pre-multi-photo version, and
-    // pointing at the first photo rather than some other one.
-    expect(asset.photo_path).toBe(photos[0].storage_path);
 
     // The rows are only half of it - the objects have to be in Storage
     // too, or the detail screen shows broken images.
