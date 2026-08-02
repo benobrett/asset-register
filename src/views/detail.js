@@ -1,10 +1,11 @@
-import { supabase, getPhotoUrl } from '../supabase.js';
+import { supabase, getPhotoUrls } from '../supabase.js';
 import { getSession, getProfile } from '../auth.js';
 import { validateAssetForm, validateRepairForm } from '../validation.js';
-import { queueAsset, queueRepair, queueRepairComment } from '../db.js';
+import { queueAsset, queueRepair, queueRepairComment, getUnsyncedPhotosForAsset } from '../db.js';
 import { syncAll } from '../sync.js';
 import { formatAssetId, CONDITION_VALUES, formatCondition } from '../format.js';
 import { confirmDialog } from '../confirmDialog.js';
+import { openLightbox } from '../lightbox.js';
 
 const TRASH_ICON_SVG = `
   <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
@@ -162,13 +163,59 @@ export async function renderDetail(container, { navigate, params }) {
   let outsideInfoClickHandler = null;
   let repairSortKey = 'newest';
 
-  let photoUrl = null;
-  if (asset.photo_path) {
-    try {
-      photoUrl = await getPhotoUrl(asset.photo_path);
-    } catch {
-      // Photo failed to load a signed URL; render without it.
-    }
+  // Resolved once per asset view, not per render: drawView() re-runs on
+  // every interaction (opening an edit form, expanding a comment
+  // thread), and signing four URLs again each time would be a network
+  // round trip for nothing.
+  //
+  // [{ id, url, alt }] in display order. Unsynced photos come from the
+  // local blob rather than a signed URL, because there's no object in
+  // Storage to sign yet - an asset captured offline and opened before it
+  // syncs still shows its photos.
+  let photos = [];
+  try {
+    const [savedResult, queued] = await Promise.all([
+      supabase
+        .from('asset_photos')
+        .select('id, storage_path, position')
+        .eq('asset_id', params.id)
+        .order('position', { ascending: true }),
+      getUnsyncedPhotosForAsset(params.id),
+    ]);
+
+    const saved = savedResult.data ?? [];
+    const signedUrls = await getPhotoUrls(saved.map((photo) => photo.storage_path));
+
+    // A photo that has just synced briefly exists in both - the row is
+    // written before the queue entry is dropped - so the saved copy wins
+    // and it isn't shown twice.
+    const savedIds = new Set(saved.map((photo) => photo.id));
+    const pending = queued
+      .filter((photo) => !savedIds.has(photo.id))
+      .map((photo) => ({
+        id: photo.id,
+        position: photo.position ?? 1,
+        url: URL.createObjectURL(photo.blob),
+      }));
+
+    photos = [
+      ...saved.map((photo) => ({
+        id: photo.id,
+        position: photo.position,
+        url: signedUrls.get(photo.storage_path) ?? null,
+      })),
+      ...pending,
+    ]
+      .filter((photo) => photo.url)
+      // position is a sort key with gaps in it, not an index.
+      .sort((a, b) => a.position - b.position)
+      .map((photo, index, all) => ({
+        ...photo,
+        alt: all.length > 1 ? `Asset photo ${index + 1} of ${all.length}` : 'Asset photo',
+      }));
+  } catch {
+    // Photos couldn't be listed or signed - render the asset without
+    // them rather than failing the whole screen over an image.
   }
 
   function renderRepairItem(repair) {
@@ -396,21 +443,47 @@ export async function renderDetail(container, { navigate, params }) {
   function drawView() {
     body.innerHTML = `
       <article class="asset-detail">
-        ${photoUrl ? `<img src="${photoUrl}" alt="Asset photo" class="asset-detail-photo" />` : ''}
-        <dl>
-          <dt>Asset ID</dt>
-          <dd>${formatAssetId(asset.asset_number)}</dd>
-          <dt>Asset name</dt>
-          <dd>${escapeHtml(asset.asset_name)}</dd>
-          <dt>Description</dt>
-          <dd>${escapeHtml(asset.description)}</dd>
-          <dt>Date/time</dt>
-          <dd>${new Date(asset.recorded_at).toLocaleString()}</dd>
-          <dt>Condition</dt>
-          <dd>${formatCondition(asset.condition) ?? 'Not set'}</dd>
-          <dt>Condition note</dt>
-          <dd>${asset.condition_note ? escapeHtml(asset.condition_note) : '—'}</dd>
-        </dl>
+        <!-- Fields first in the DOM, photos second, so they read in that
+             order for a screen reader and stack that way on a narrow
+             screen. The side-by-side arrangement is purely CSS. -->
+        <div class="asset-detail-layout">
+          <dl>
+            <dt>Asset ID</dt>
+            <dd>${formatAssetId(asset.asset_number)}</dd>
+            <dt>Asset name</dt>
+            <dd>${escapeHtml(asset.asset_name)}</dd>
+            <dt>Description</dt>
+            <dd>${escapeHtml(asset.description)}</dd>
+            <dt>Date/time</dt>
+            <dd>${new Date(asset.recorded_at).toLocaleString()}</dd>
+            <dt>Condition</dt>
+            <dd>${formatCondition(asset.condition) ?? 'Not set'}</dd>
+            <dt>Condition note</dt>
+            <dd>${asset.condition_note ? escapeHtml(asset.condition_note) : '—'}</dd>
+          </dl>
+          ${
+            photos.length
+              ? `<ul class="photo-grid asset-detail-photos">
+                  ${photos
+                    .map(
+                      (photo, index) => `
+                    <li class="photo-grid-item">
+                      <button
+                        type="button"
+                        class="photo-thumb-button"
+                        data-photo-index="${index}"
+                        aria-label="View ${escapeHtml(photo.alt)}"
+                      >
+                        <img src="${escapeHtml(photo.url)}" alt="${escapeHtml(photo.alt)}" class="photo-thumb" />
+                      </button>
+                    </li>
+                  `
+                    )
+                    .join('')}
+                </ul>`
+              : ''
+          }
+        </div>
         <p class="form-error" id="delete-error" role="alert" hidden></p>
         <div class="edit-actions">
           <button type="button" id="edit-button">Edit</button>
@@ -460,6 +533,21 @@ export async function renderDetail(container, { navigate, params }) {
         </div>
       </section>
     `;
+
+    // Re-wired on every drawView, like everything else here - the whole
+    // template is rewritten each time, so these are fresh nodes.
+    for (const button of body.querySelectorAll('.photo-thumb-button')) {
+      button.addEventListener('click', () => {
+        openLightbox({
+          photos,
+          startIndex: Number(button.dataset.photoIndex),
+          // Focus returns to the thumbnail that opened it. Safe across a
+          // re-render: the overlay doesn't trigger one, so this node is
+          // still in the document when it closes.
+          returnFocusTo: button,
+        });
+      });
+    }
 
     body.querySelector('#edit-button').addEventListener('click', drawEditForm);
     body.querySelector('#delete-asset-button').addEventListener('click', async () => {
