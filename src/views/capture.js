@@ -1,9 +1,15 @@
 import { getSession } from '../auth.js';
-import { validateAssetForm, validateRepairForm } from '../validation.js';
-import { watchPhotoPreview, buildPhotoPath } from '../camera.js';
-import { queueAsset, queueRepair } from '../db.js';
+import {
+  validateAssetForm,
+  validateRepairForm,
+  photoLimitReached,
+  MAX_ASSET_PHOTOS,
+} from '../validation.js';
+import { downscaleImage, buildPhotoPath } from '../camera.js';
+import { queueAsset, queuePhoto, queueRepair } from '../db.js';
 import { syncAll } from '../sync.js';
 import { CONDITION_VALUES, formatCondition } from '../format.js';
+import { confirmDialog } from '../confirmDialog.js';
 
 function nowForDateTimeLocal() {
   const now = new Date();
@@ -37,11 +43,22 @@ export function renderCapture(container, { navigate }) {
         </label>
         <p class="field-error" data-error-for="assetName" hidden></p>
 
-        <label>
-          Photo
-          <input type="file" name="photo" accept="image/*" capture="environment" />
-        </label>
-        <img id="photo-preview" alt="Photo preview" hidden />
+        <!-- The input is hidden and opened by the button below, rather
+             than being the control itself: it needs to be re-triggered
+             once per photo, and a native file input gives no room for a
+             tap target sized for a tablet or for a label that changes
+             with the count. -->
+        <p class="photo-section-label" id="photos-label">Photos</p>
+        <input
+          type="file"
+          id="photo-input"
+          accept="image/*"
+          capture="environment"
+          hidden
+        />
+        <ul class="photo-grid" id="photo-grid" aria-labelledby="photos-label"></ul>
+        <button type="button" id="add-photo-button">Add photo</button>
+        <p class="asset-meta" id="photo-limit-note" hidden></p>
 
         <label>
           Date/time
@@ -103,9 +120,85 @@ export function renderCapture(container, { navigate }) {
     .addEventListener('click', () => navigate('#/register'));
 
   const form = container.querySelector('#capture-form');
-  const photoInput = form.photo;
-  const photoPreview = container.querySelector('#photo-preview');
-  watchPhotoPreview(photoInput, photoPreview);
+
+  // { localId, blob, url } - url is an object URL for the thumbnail,
+  // revoked on removal so a long capture session doesn't leak them.
+  const pendingPhotos = [];
+  const photoInput = container.querySelector('#photo-input');
+  const photoGrid = container.querySelector('#photo-grid');
+  const addPhotoButton = container.querySelector('#add-photo-button');
+  const photoLimitNote = container.querySelector('#photo-limit-note');
+
+  function drawPhotoGrid() {
+    photoGrid.innerHTML = pendingPhotos
+      .map(
+        (photo, index) => `
+        <li class="photo-grid-item">
+          <img src="${photo.url}" alt="Photo ${index + 1}" class="photo-thumb" />
+          <button type="button" class="link-button remove-photo-button" data-local-id="${photo.localId}">
+            Remove
+          </button>
+        </li>
+      `
+      )
+      .join('');
+
+    for (const button of photoGrid.querySelectorAll('.remove-photo-button')) {
+      button.addEventListener('click', async () => {
+        const photo = pendingPhotos.find((p) => p.localId === button.dataset.localId);
+        if (!photo) return;
+        // Through the shared confirm rather than a bespoke one: a
+        // mis-tap here means walking back to re-photograph the asset.
+        const confirmed = await confirmDialog({
+          message: 'Remove this photo? You can take another one instead.',
+          confirmLabel: 'Remove',
+        });
+        if (!confirmed) return;
+
+        URL.revokeObjectURL(photo.url);
+        pendingPhotos.splice(pendingPhotos.indexOf(photo), 1);
+        drawPhotoGrid();
+      });
+    }
+
+    // Says why rather than going quiet when tapped - a control that
+    // silently does nothing reads as broken.
+    const atLimit = photoLimitReached(pendingPhotos.length);
+    addPhotoButton.disabled = atLimit;
+    photoLimitNote.hidden = !atLimit;
+    photoLimitNote.textContent = atLimit
+      ? `Maximum of ${MAX_ASSET_PHOTOS} photos. Remove one to add another.`
+      : '';
+  }
+
+  addPhotoButton.addEventListener('click', () => photoInput.click());
+
+  photoInput.addEventListener('change', async () => {
+    const file = photoInput.files[0];
+    // Cleared straight away, before any await: without this, taking the
+    // same file twice in a row fires no change event at all and the
+    // second photo vanishes with no error.
+    photoInput.value = '';
+    if (!file) return;
+    if (photoLimitReached(pendingPhotos.length)) return;
+
+    addPhotoButton.disabled = true;
+    try {
+      const blob = await downscaleImage(file);
+      pendingPhotos.push({
+        localId: crypto.randomUUID(),
+        blob,
+        url: URL.createObjectURL(blob),
+      });
+      drawPhotoGrid();
+    } finally {
+      // drawPhotoGrid owns the disabled state whenever it runs; this
+      // only matters on the path where downscaling threw.
+      if (!photoLimitReached(pendingPhotos.length)) addPhotoButton.disabled = false;
+    }
+  });
+
+  drawPhotoGrid();
 
   const repairsSection = container.querySelector('#repairs-section');
   let pendingRepairs = [];
@@ -286,11 +379,18 @@ export function renderCapture(container, { navigate }) {
 
     try {
       const session = await getSession();
-      const file = photoInput.files[0];
-      const photoPath = file ? buildPhotoPath(session.user.id, file) : null;
-
       const assetId = crypto.randomUUID();
       const recordedAtIso = new Date(recordedAt).toISOString();
+
+      // Paths are decided here, before anything is queued, so the asset
+      // record can carry the first one (see photoPath below).
+      const photosToQueue = pendingPhotos.map((photo, index) => ({
+        id: crypto.randomUUID(),
+        assetId,
+        storagePath: buildPhotoPath(session.user.id),
+        position: index + 1,
+        blob: photo.blob,
+      }));
 
       // Write to the offline queue first, then try to sync immediately —
       // if the network drops mid-sync the record just stays queued and
@@ -300,11 +400,22 @@ export function renderCapture(container, { navigate }) {
         assetName: assetName.trim(),
         description: description.trim(),
         recordedAt: recordedAtIso,
-        photoPath,
-        photo: file ?? null,
+        // The first photo's path, purely so clients still running the
+        // pre-multi-photo version show an image for assets created after
+        // this shipped - they read assets.photo_path and know nothing of
+        // asset_photos. Goes away with the column itself, in the
+        // follow-up that drops it. The blob is *not* attached here: the
+        // photos are queued separately below, and sending it twice would
+        // upload the same bytes twice.
+        photoPath: photosToQueue[0]?.storagePath ?? null,
+        photo: null,
         condition,
         conditionNote,
       });
+
+      for (const photo of photosToQueue) {
+        await queuePhoto(photo);
+      }
 
       for (const repair of pendingRepairs) {
         await queueRepair({

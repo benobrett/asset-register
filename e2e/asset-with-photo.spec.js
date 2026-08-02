@@ -34,11 +34,12 @@ test('adds an asset with a photo', async ({ page }) => {
   // exact: true - "Description" would otherwise substring-match the New
   // repair form's "Repair description" field, also present on this page.
   await page.getByLabel('Description', { exact: true }).fill('Created by a photo e2e test.');
-  // A plain file input, not a live camera preview - this stubs the *file*
-  // Chrome's capture="environment" would hand back, not the camera itself.
-  // See CLAUDE.md's e2e limitations note.
-  await page.getByLabel('Photo').setInputFiles(FIXTURE_PHOTO);
-  await expect(page.getByAltText('Photo preview')).toBeVisible();
+  // The input is hidden and driven by the "Add photo" button (see
+  // CLAUDE.md's camera notes), so it's addressed directly rather than by
+  // label. This stubs the *file* Chrome's capture="environment" would
+  // hand back, not the camera itself - see the e2e limitations note.
+  await page.locator('#photo-input').setInputFiles(FIXTURE_PHOTO);
+  await expect(page.getByAltText('Photo 1')).toBeVisible();
 
   await page.getByRole('button', { name: 'Save asset' }).click();
   await expect(page).toHaveURL(/#\/register$/);

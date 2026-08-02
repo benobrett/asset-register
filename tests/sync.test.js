@@ -5,6 +5,8 @@ const {
   tableUpsert,
   getUnsyncedAssetsMock,
   markAssetSyncedMock,
+  getUnsyncedPhotosMock,
+  markPhotoSyncedMock,
   getUnsyncedRepairsMock,
   markRepairSyncedMock,
   getUnsyncedRepairCommentsMock,
@@ -14,6 +16,8 @@ const {
   tableUpsert: vi.fn(),
   getUnsyncedAssetsMock: vi.fn(),
   markAssetSyncedMock: vi.fn(),
+  getUnsyncedPhotosMock: vi.fn(),
+  markPhotoSyncedMock: vi.fn(),
   getUnsyncedRepairsMock: vi.fn(),
   markRepairSyncedMock: vi.fn(),
   getUnsyncedRepairCommentsMock: vi.fn(),
@@ -31,13 +35,21 @@ vi.mock('../src/supabase.js', () => ({
 vi.mock('../src/db.js', () => ({
   getUnsyncedAssets: getUnsyncedAssetsMock,
   markAssetSynced: markAssetSyncedMock,
+  getUnsyncedPhotos: getUnsyncedPhotosMock,
+  markPhotoSynced: markPhotoSyncedMock,
   getUnsyncedRepairs: getUnsyncedRepairsMock,
   markRepairSynced: markRepairSyncedMock,
   getUnsyncedRepairComments: getUnsyncedRepairCommentsMock,
   markRepairCommentSynced: markRepairCommentSyncedMock,
 }));
 
-const { syncQueuedAssets, syncQueuedRepairs, syncQueuedRepairComments, syncAll } = await import(
+const {
+  syncQueuedAssets,
+  syncQueuedPhotos,
+  syncQueuedRepairs,
+  syncQueuedRepairComments,
+  syncAll,
+} = await import(
   '../src/sync.js'
 );
 
@@ -46,6 +58,8 @@ beforeEach(() => {
   tableUpsert.mockReset().mockResolvedValue({ error: null });
   getUnsyncedAssetsMock.mockReset().mockResolvedValue([]);
   markAssetSyncedMock.mockReset().mockResolvedValue(undefined);
+  getUnsyncedPhotosMock.mockReset().mockResolvedValue([]);
+  markPhotoSyncedMock.mockReset().mockResolvedValue(undefined);
   getUnsyncedRepairsMock.mockReset().mockResolvedValue([]);
   markRepairSyncedMock.mockReset().mockResolvedValue(undefined);
   getUnsyncedRepairCommentsMock.mockReset().mockResolvedValue([]);
@@ -141,6 +155,41 @@ describe('syncQueuedAssets', () => {
     expect(result).toEqual({ succeeded: ['5'], failed: [] });
   });
 
+  // The shape assets were queued in before multiple photos shipped: one
+  // blob attached to the asset itself, no separate photo records. The
+  // app shell is service-worker cached, so a device can still be holding
+  // one of these well after the deploy. It has to upload *and* end up
+  // with an asset_photos row, or the photo reaches Storage with nothing
+  // pointing at it and silently disappears from the app.
+  it('syncs a legacy single-photo asset and gives it a photo row', async () => {
+    getUnsyncedAssetsMock.mockResolvedValue([
+      {
+        id: 'legacy-1',
+        assetName: 'Wheelbarrow',
+        description: 'Garden wheelbarrow',
+        recordedAt: '2026-07-25T10:00:00.000Z',
+        photoPath: 'user-1/legacy.jpg',
+        photo: new Blob(['old']),
+      },
+    ]);
+
+    const result = await syncQueuedAssets();
+
+    expect(storageUpload).toHaveBeenCalledWith('user-1/legacy.jpg', expect.any(Blob), {
+      upsert: true,
+    });
+    expect(tableUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'legacy-1', photo_path: 'user-1/legacy.jpg' })
+    );
+    expect(tableUpsert).toHaveBeenCalledWith({
+      asset_id: 'legacy-1',
+      storage_path: 'user-1/legacy.jpg',
+      position: 1,
+    });
+    expect(markAssetSyncedMock).toHaveBeenCalledWith('legacy-1');
+    expect(result).toEqual({ succeeded: ['legacy-1'], failed: [] });
+  });
+
   it('skips the photo upload when the asset has no photo', async () => {
     getUnsyncedAssetsMock.mockResolvedValue([
       {
@@ -176,6 +225,74 @@ describe('syncQueuedAssets', () => {
 
     expect(markAssetSyncedMock).not.toHaveBeenCalled();
     expect(result).toEqual({ succeeded: [], failed: [{ id: '3', error: 'network error' }] });
+  });
+});
+
+describe('syncQueuedPhotos', () => {
+  it('uploads each blob and inserts its row, preserving position', async () => {
+    getUnsyncedPhotosMock.mockResolvedValue([
+      {
+        id: 'p1',
+        assetId: 'a1',
+        storagePath: 'user-1/p1.jpg',
+        position: 1,
+        blob: new Blob(['x']),
+      },
+      {
+        id: 'p2',
+        assetId: 'a1',
+        storagePath: 'user-1/p2.jpg',
+        position: 2,
+        blob: new Blob(['y']),
+      },
+    ]);
+
+    const result = await syncQueuedPhotos();
+
+    expect(storageUpload).toHaveBeenCalledWith('user-1/p1.jpg', expect.any(Blob), { upsert: true });
+    expect(storageUpload).toHaveBeenCalledWith('user-1/p2.jpg', expect.any(Blob), { upsert: true });
+    expect(tableUpsert).toHaveBeenCalledWith({
+      id: 'p1',
+      asset_id: 'a1',
+      storage_path: 'user-1/p1.jpg',
+      position: 1,
+    });
+    expect(tableUpsert).toHaveBeenCalledWith({
+      id: 'p2',
+      asset_id: 'a1',
+      storage_path: 'user-1/p2.jpg',
+      position: 2,
+    });
+    expect(result).toEqual({ succeeded: ['p1', 'p2'], failed: [] });
+  });
+
+  // Positions are a sort key, not a count - removing a photo leaves a
+  // gap rather than renumbering rows that didn't change.
+  it('keeps non-contiguous positions exactly as queued', async () => {
+    getUnsyncedPhotosMock.mockResolvedValue([
+      { id: 'p3', assetId: 'a1', storagePath: 'user-1/p3.jpg', position: 4, blob: new Blob(['z']) },
+    ]);
+
+    await syncQueuedPhotos();
+
+    expect(tableUpsert).toHaveBeenCalledWith({
+      id: 'p3',
+      asset_id: 'a1',
+      storage_path: 'user-1/p3.jpg',
+      position: 4,
+    });
+  });
+
+  it('leaves a photo queued and reports the failure when the upload fails', async () => {
+    getUnsyncedPhotosMock.mockResolvedValue([
+      { id: 'p4', assetId: 'a1', storagePath: 'user-1/p4.jpg', position: 1, blob: new Blob(['q']) },
+    ]);
+    storageUpload.mockResolvedValue({ error: { message: 'network error' } });
+
+    const result = await syncQueuedPhotos();
+
+    expect(markPhotoSyncedMock).not.toHaveBeenCalled();
+    expect(result).toEqual({ succeeded: [], failed: [{ id: 'p4', error: 'network error' }] });
   });
 });
 
@@ -351,10 +468,17 @@ describe('syncQueuedRepairComments', () => {
 });
 
 describe('syncAll', () => {
-  it('syncs assets before repairs before repair comments', async () => {
+  // Photos and repairs both reference an asset, and a comment references
+  // a repair, so anything running before the row it points at would fail
+  // its foreign key.
+  it('syncs assets before photos before repairs before repair comments', async () => {
     const order = [];
     getUnsyncedAssetsMock.mockImplementation(async () => {
       order.push('assets');
+      return [];
+    });
+    getUnsyncedPhotosMock.mockImplementation(async () => {
+      order.push('photos');
       return [];
     });
     getUnsyncedRepairsMock.mockImplementation(async () => {
@@ -368,6 +492,6 @@ describe('syncAll', () => {
 
     await syncAll();
 
-    expect(order).toEqual(['assets', 'repairs', 'repairComments']);
+    expect(order).toEqual(['assets', 'photos', 'repairs', 'repairComments']);
   });
 });

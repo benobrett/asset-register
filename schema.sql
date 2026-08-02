@@ -9,6 +9,11 @@ create table assets (
   asset_name text not null,
   description text not null,
   recorded_at timestamptz not null default now(),   -- the user-facing "Date/time" field: pre-populated client-side, editable
+  -- Superseded by asset_photos (an asset can have up to four photos).
+  -- Kept, and still written with the first photo's path, only so clients
+  -- running the pre-multi-photo version - the app shell is service-worker
+  -- cached, so they persist for a while after a deploy - keep showing an
+  -- image. Dropping it is a follow-up issue; see CLAUDE.md.
   photo_path text,                                   -- object path in Supabase Storage
   -- Current state only, both nullable - every asset that predates this
   -- feature has neither, and there's no sensible value to backfill.
@@ -52,6 +57,26 @@ create table asset_comments (
 );
 
 create index asset_comments_asset_id_idx on asset_comments (asset_id);
+
+-- Up to four photos per asset (the ceiling is enforced client-side, in
+-- validation.js - see CLAUDE.md for why it isn't enforced here). uuid id
+-- for the same reason as asset_repairs: the client generates it offline
+-- and Supabase stores that same value, so there's no reconciliation step.
+-- position is a sort key, not a count - removing a photo leaves a gap
+-- rather than renumbering the rows that didn't change, which two offline
+-- devices would otherwise do differently.
+create table asset_photos (
+  id uuid primary key default gen_random_uuid(),
+  -- on delete cascade, same as asset_repairs. Note this drops the rows
+  -- but not the Storage objects behind them - see CLAUDE.md's
+  -- orphaned-file limitation.
+  asset_id uuid references assets(id) on delete cascade not null,
+  storage_path text not null,
+  position integer not null default 1,
+  created_at timestamptz not null default now()
+);
+
+create index asset_photos_asset_id_idx on asset_photos (asset_id);
 
 -- Repairs are a log, not a single flag: an asset can have several repair
 -- records over its life, each independently editable and markable as
@@ -129,6 +154,15 @@ alter table repair_comments enable row level security;
 
 create policy "Logged-in users can manage all repair comments"
   on repair_comments for all
+  using (auth.uid() is not null)
+  with check (auth.uid() is not null);
+
+alter table asset_photos enable row level security;
+
+-- `for all` covers delete explicitly, which removing a photo from a
+-- saved asset depends on.
+create policy "Logged-in users can manage all asset photos"
+  on asset_photos for all
   using (auth.uid() is not null)
   with check (auth.uid() is not null);
 

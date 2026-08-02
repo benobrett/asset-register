@@ -5,9 +5,11 @@
 import { supabase, PHOTO_BUCKET } from './supabase.js';
 import {
   getUnsyncedAssets,
+  getUnsyncedPhotos,
   getUnsyncedRepairs,
   getUnsyncedRepairComments,
   markAssetSynced,
+  markPhotoSynced,
   markRepairSynced,
   markRepairCommentSynced,
 } from './db.js';
@@ -19,6 +21,13 @@ export async function syncQueuedAssets() {
 
   for (const asset of pending) {
     try {
+      // Legacy shape only. Assets queued since multiple photos shipped
+      // carry no blob of their own - their photos are separate records in
+      // the photo queue - but a record captured before that upgrade is
+      // still sitting in IndexedDB with one attached, and the app shell
+      // is service-worker cached, so those can surface well after a
+      // deploy. Upload it, and give it an asset_photos row too, or it
+      // would reach Storage without anything pointing at it.
       if (asset.photo && asset.photoPath) {
         const { error: uploadError } = await supabase.storage
           .from(PHOTO_BUCKET)
@@ -43,10 +52,53 @@ export async function syncQueuedAssets() {
       });
       if (insertError) throw insertError;
 
+      // Second half of the legacy path above: without this the photo
+      // would upload and the asset would save, but nothing would list it
+      // once the app reads photos from asset_photos.
+      if (asset.photo && asset.photoPath) {
+        const { error: photoRowError } = await supabase
+          .from('asset_photos')
+          .upsert({ asset_id: asset.id, storage_path: asset.photoPath, position: 1 });
+        if (photoRowError) throw photoRowError;
+      }
+
       await markAssetSynced(asset.id);
       succeeded.push(asset.id);
     } catch (err) {
       failed.push({ id: asset.id, error: err.message || String(err) });
+    }
+  }
+
+  return { succeeded, failed };
+}
+
+export async function syncQueuedPhotos() {
+  const pending = await getUnsyncedPhotos();
+  const succeeded = [];
+  const failed = [];
+
+  for (const photo of pending) {
+    try {
+      // Storage first, then the row that points at it. The other order
+      // would briefly leave a row referencing an object that isn't there
+      // yet, which renders as a broken image.
+      const { error: uploadError } = await supabase.storage
+        .from(PHOTO_BUCKET)
+        .upload(photo.storagePath, photo.blob, { upsert: true });
+      if (uploadError) throw uploadError;
+
+      const { error: insertError } = await supabase.from('asset_photos').upsert({
+        id: photo.id,
+        asset_id: photo.assetId,
+        storage_path: photo.storagePath,
+        position: photo.position ?? 1,
+      });
+      if (insertError) throw insertError;
+
+      await markPhotoSynced(photo.id);
+      succeeded.push(photo.id);
+    } catch (err) {
+      failed.push({ id: photo.id, error: err.message || String(err) });
     }
   }
 
@@ -109,13 +161,17 @@ export async function syncQueuedRepairComments() {
   return { succeeded, failed };
 }
 
-// Assets before repairs before comments — each references the row before
-// it as a foreign key, so syncing out of order would fail.
+// Assets, then photos, then repairs, then repair comments. Each step
+// references a row created by an earlier one as a foreign key, so
+// syncing out of order would fail: photos and repairs both reference an
+// asset, and a comment references a repair. Photos sit directly after
+// assets because that's the only thing they depend on.
 export async function syncAll() {
   const assets = await syncQueuedAssets();
+  const photos = await syncQueuedPhotos();
   const repairs = await syncQueuedRepairs();
   const repairComments = await syncQueuedRepairComments();
-  return { assets, repairs, repairComments };
+  return { assets, photos, repairs, repairComments };
 }
 
 export function watchConnectivity() {
