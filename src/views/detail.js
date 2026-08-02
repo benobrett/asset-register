@@ -1,11 +1,36 @@
-import { supabase, getPhotoUrls } from '../supabase.js';
+import { supabase, getPhotoUrls, PHOTO_BUCKET } from '../supabase.js';
 import { getSession, getProfile } from '../auth.js';
-import { validateAssetForm, validateRepairForm } from '../validation.js';
-import { queueAsset, queueRepair, queueRepairComment, getUnsyncedPhotosForAsset } from '../db.js';
+import {
+  validateAssetForm,
+  validateRepairForm,
+  photoLimitReached,
+  MAX_ASSET_PHOTOS,
+} from '../validation.js';
+import {
+  queueAsset,
+  queuePhoto,
+  queueRepair,
+  queueRepairComment,
+  getUnsyncedPhotosForAsset,
+  removeQueuedPhoto,
+} from '../db.js';
+import { downscaleImage, buildPhotoPath } from '../camera.js';
 import { syncAll } from '../sync.js';
 import { formatAssetId, CONDITION_VALUES, formatCondition } from '../format.js';
 import { confirmDialog } from '../confirmDialog.js';
 import { openLightbox } from '../lightbox.js';
+
+// Same bound, and the same reasoning, as register.js's QUERY_TIMEOUT_MS:
+// an offline fetch can hang rather than reject, and these are awaited
+// before the screen redraws.
+const PHOTO_QUERY_TIMEOUT_MS = 3000;
+
+function withPhotoQueryTimeout(promise, fallback) {
+  return Promise.race([
+    promise,
+    new Promise((resolve) => setTimeout(() => resolve(fallback), PHOTO_QUERY_TIMEOUT_MS)),
+  ]);
+}
 
 const TRASH_ICON_SVG = `
   <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
@@ -162,6 +187,18 @@ export async function renderDetail(container, { navigate, params }) {
   let infoRepairId = null;
   let outsideInfoClickHandler = null;
   let repairSortKey = 'newest';
+  // Removing a photo is destructive and permanent, so viewing stays a
+  // safe mode: outside this, tapping a thumbnail only opens the viewer.
+  // A delete control sitting on every photo all the time is a mis-tap
+  // waiting to happen on a tablet.
+  //
+  // Its own toggle rather than being folded into the Edit form below,
+  // because the two work differently: the form's changes apply on Save,
+  // whereas adding or removing a photo takes effect immediately. Putting
+  // deferred and immediate actions in one form invites someone to hit
+  // Cancel and expect the photo back.
+  let editingPhotos = false;
+  let photoError = null;
 
   // Resolved once per asset view, not per render: drawView() re-runs on
   // every interaction (opening an edit form, expanding a comment
@@ -172,40 +209,88 @@ export async function renderDetail(container, { navigate, params }) {
   // local blob rather than a signed URL, because there's no object in
   // Storage to sign yet - an asset captured offline and opened before it
   // syncs still shows its photos.
+  // [{ id, position, url, alt, pending, storagePath }] in display order.
+  // `pending` is what decides how a photo can be removed later, so it's
+  // carried through rather than recomputed.
   let photos = [];
-  try {
-    const [savedResult, queued] = await Promise.all([
-      supabase
-        .from('asset_photos')
-        .select('id, storage_path, position')
-        .eq('asset_id', params.id)
-        .order('position', { ascending: true }),
-      getUnsyncedPhotosForAsset(params.id),
-    ]);
+  // The server-side half, kept across reloads so a failed refresh can
+  // fall back to it - see the note in loadPhotos.
+  let savedPhotos = [];
 
-    const saved = savedResult.data ?? [];
-    const signedUrls = await getPhotoUrls(saved.map((photo) => photo.storage_path));
+  async function loadPhotos() {
+    // The blob URLs belong to this list; drop them before rebuilding it
+    // or every add/remove leaks one for the life of the page.
+    for (const photo of photos) {
+      if (photo.pending) URL.revokeObjectURL(photo.url);
+    }
+    photos = [];
+
+    // Local first, and never inside the try below: these come from
+    // IndexedDB, so they're available with no connection and must still
+    // show when the server side can't be reached.
+    let queued = [];
+    try {
+      queued = await getUnsyncedPhotosForAsset(params.id);
+    } catch {
+      // No local queue to read - carry on with whatever the server has.
+    }
+
+    try {
+      // Bounded for the same reason register.js bounds its queries: an
+      // offline fetch doesn't always reject, it can simply hang, and
+      // this is awaited before the screen re-renders - an unbounded one
+      // would leave the view frozen on its previous state.
+      const savedResult = await withPhotoQueryTimeout(
+        supabase
+          .from('asset_photos')
+          .select('id, storage_path, position')
+          .eq('asset_id', params.id)
+          .order('position', { ascending: true }),
+        null
+      );
+      // null is the timeout's own marker, distinct from a query that
+      // genuinely came back with no rows - which does mean "no photos".
+      if (savedResult) {
+        const saved = savedResult.data ?? [];
+        const signedUrls = await withPhotoQueryTimeout(
+          getPhotoUrls(saved.map((photo) => photo.storage_path)),
+          new Map()
+        );
+        savedPhotos = saved
+          .map((photo) => ({
+            id: photo.id,
+            position: photo.position,
+            storagePath: photo.storage_path,
+            url: signedUrls.get(photo.storage_path) ?? null,
+            pending: false,
+          }))
+          .filter((photo) => photo.url);
+      }
+    } catch {
+      // Keep the last known set (below) rather than dropping them.
+    }
+    // Deliberately *not* cleared when the query fails. Adding a photo
+    // offline re-runs this, and a synced photo can't be re-listed or
+    // re-signed with no connection - clearing would make the photos
+    // already on screen vanish as a side effect of adding another. The
+    // signed URLs already in hand stay valid for the hour they were
+    // issued for.
 
     // A photo that has just synced briefly exists in both - the row is
     // written before the queue entry is dropped - so the saved copy wins
     // and it isn't shown twice.
-    const savedIds = new Set(saved.map((photo) => photo.id));
+    const savedIds = new Set(savedPhotos.map((photo) => photo.id));
     const pending = queued
       .filter((photo) => !savedIds.has(photo.id))
       .map((photo) => ({
         id: photo.id,
         position: photo.position ?? 1,
+        storagePath: photo.storagePath,
         url: URL.createObjectURL(photo.blob),
+        pending: true,
       }));
 
-    photos = [
-      ...saved.map((photo) => ({
-        id: photo.id,
-        position: photo.position,
-        url: signedUrls.get(photo.storage_path) ?? null,
-      })),
-      ...pending,
-    ]
+    photos = [...savedPhotos, ...pending]
       .filter((photo) => photo.url)
       // position is a sort key with gaps in it, not an index.
       .sort((a, b) => a.position - b.position)
@@ -213,9 +298,51 @@ export async function renderDetail(container, { navigate, params }) {
         ...photo,
         alt: all.length > 1 ? `Asset photo ${index + 1} of ${all.length}` : 'Asset photo',
       }));
-  } catch {
-    // Photos couldn't be listed or signed - render the asset without
-    // them rather than failing the whole screen over an image.
+  }
+
+  await loadPhotos();
+
+  // Deleting a photo that has already synced means removing a database
+  // row *and* a Storage object, and there's no mechanism in this app for
+  // queueing that reliably - asset deletion is a direct call too, so this
+  // keeps one deletion story rather than inventing a second. Hence the
+  // explicit connection check, worded the way the password-reset screens
+  // word theirs rather than failing with a generic network error.
+  async function deleteSyncedPhoto(photo) {
+    if (!navigator.onLine) {
+      throw new Error('You need to be online to delete this photo.');
+    }
+
+    // Row first, then the object. The other way round, a failure between
+    // the two leaves a thumbnail pointing at a file that no longer
+    // exists - a visible, confusing bug on this screen. This way it
+    // leaves an orphaned file: invisible, harmless in the short term,
+    // and cleanable later (see CLAUDE.md).
+    const { error: rowError } = await supabase.from('asset_photos').delete().eq('id', photo.id);
+    if (rowError) throw rowError;
+
+    const { error: objectError } = await supabase.storage
+      .from(PHOTO_BUCKET)
+      .remove([photo.storagePath]);
+    if (objectError) {
+      // The row is already gone, so as far as the app is concerned the
+      // photo has been removed. Nothing useful to tell the user here.
+      console.error('Photo row deleted but its file could not be removed:', objectError);
+    }
+
+    // assets.photo_path still points at whatever the first photo was, and
+    // old clients render it directly (see CLAUDE.md) - left stale it
+    // would be a broken image for them rather than simply no image.
+    const remaining = photos
+      .filter((candidate) => candidate.id !== photo.id && !candidate.pending)
+      .sort((a, b) => a.position - b.position);
+    const { error: assetError } = await supabase
+      .from('assets')
+      .update({ photo_path: remaining[0]?.storagePath ?? null })
+      .eq('id', asset.id);
+    if (assetError) {
+      console.error('Could not update the legacy photo_path:', assetError);
+    }
   }
 
   function renderRepairItem(repair) {
@@ -461,28 +588,59 @@ export async function renderDetail(container, { navigate, params }) {
             <dt>Condition note</dt>
             <dd>${asset.condition_note ? escapeHtml(asset.condition_note) : '—'}</dd>
           </dl>
-          ${
-            photos.length
-              ? `<ul class="photo-grid asset-detail-photos">
-                  ${photos
-                    .map(
-                      (photo, index) => `
-                    <li class="photo-grid-item">
-                      <button
-                        type="button"
-                        class="photo-thumb-button"
-                        data-photo-index="${index}"
-                        aria-label="View ${escapeHtml(photo.alt)}"
-                      >
-                        <img src="${escapeHtml(photo.url)}" alt="${escapeHtml(photo.alt)}" class="photo-thumb" />
-                      </button>
-                    </li>
-                  `
-                    )
-                    .join('')}
-                </ul>`
-              : ''
-          }
+          <div class="asset-detail-photo-panel">
+            ${
+              photos.length
+                ? `<ul class="photo-grid asset-detail-photos">
+                    ${photos
+                      .map(
+                        (photo, index) => `
+                      <li class="photo-grid-item">
+                        <button
+                          type="button"
+                          class="photo-thumb-button"
+                          data-photo-index="${index}"
+                          aria-label="View ${escapeHtml(photo.alt)}"
+                          ${editingPhotos ? 'disabled' : ''}
+                        >
+                          <img src="${escapeHtml(photo.url)}" alt="${escapeHtml(photo.alt)}" class="photo-thumb" />
+                        </button>
+                        ${
+                          editingPhotos
+                            ? `<button
+                                 type="button"
+                                 class="link-button remove-photo-button"
+                                 data-photo-id="${escapeHtml(photo.id)}"
+                               >Remove</button>`
+                            : ''
+                        }
+                      </li>
+                    `
+                      )
+                      .join('')}
+                  </ul>`
+                : '<p class="asset-meta">No photos yet.</p>'
+            }
+            ${photoError ? `<p class="form-error" role="alert">${escapeHtml(photoError)}</p>` : ''}
+            <div class="edit-actions photo-panel-actions">
+              <button type="button" class="link-button" id="toggle-photo-edit">
+                ${editingPhotos ? 'Done' : 'Edit photos'}
+              </button>
+              ${
+                editingPhotos
+                  ? `<input type="file" id="detail-photo-input" accept="image/*" capture="environment" hidden />
+                     <button type="button" id="detail-add-photo" ${photoLimitReached(photos.length) ? 'disabled' : ''}>
+                       Add photo
+                     </button>`
+                  : ''
+              }
+            </div>
+            ${
+              editingPhotos && photoLimitReached(photos.length)
+                ? `<p class="asset-meta">Maximum of ${MAX_ASSET_PHOTOS} photos. Remove one to add another.</p>`
+                : ''
+            }
+          </div>
         </div>
         <p class="form-error" id="delete-error" role="alert" hidden></p>
         <div class="edit-actions">
@@ -546,6 +704,92 @@ export async function renderDetail(container, { navigate, params }) {
           // still in the document when it closes.
           returnFocusTo: button,
         });
+      });
+    }
+
+    body.querySelector('#toggle-photo-edit').addEventListener('click', () => {
+      editingPhotos = !editingPhotos;
+      photoError = null;
+      drawView();
+    });
+
+    const detailPhotoInput = body.querySelector('#detail-photo-input');
+    body.querySelector('#detail-add-photo')?.addEventListener('click', () => {
+      detailPhotoInput.click();
+    });
+
+    detailPhotoInput?.addEventListener('change', async () => {
+      const file = detailPhotoInput.files[0];
+      // Cleared before any await, same as the capture form: choosing the
+      // same file twice otherwise fires no change event at all.
+      detailPhotoInput.value = '';
+      if (!file || photoLimitReached(photos.length)) return;
+
+      photoError = null;
+      try {
+        const session = await getSession();
+        const blob = await downscaleImage(file);
+        // max + 1, not length + 1: positions have gaps in them once a
+        // photo has been removed, so counting would collide with one.
+        const nextPosition = photos.length
+          ? Math.max(...photos.map((photo) => photo.position)) + 1
+          : 1;
+
+        // Queued, never written straight to Supabase - adding a photo is
+        // the same act as capturing one, and has to work standing in
+        // front of the asset with no signal.
+        await queuePhoto({
+          id: crypto.randomUUID(),
+          assetId: asset.id,
+          storagePath: buildPhotoPath(session.user.id),
+          position: nextPosition,
+          blob,
+        });
+        if (navigator.onLine) await syncAll();
+      } catch (err) {
+        photoError = err.message || 'Could not add this photo. Try again.';
+      }
+
+      await loadPhotos();
+      drawView();
+    });
+
+    for (const button of body.querySelectorAll('.remove-photo-button')) {
+      button.addEventListener('click', async () => {
+        const photo = photos.find((candidate) => candidate.id === button.dataset.photoId);
+        if (!photo) return;
+
+        // Worded harder than the capture form's equivalent: there, the
+        // photo was taken seconds ago. Here it may be the only record of
+        // how this asset looked months back.
+        const confirmed = await confirmDialog({
+          message: photo.pending
+            ? 'Remove this photo? It has not been uploaded yet, so it will be discarded.'
+            : 'Permanently delete this photo? This cannot be undone.',
+          confirmLabel: 'Delete',
+        });
+        if (!confirmed) return;
+
+        photoError = null;
+        try {
+          if (photo.pending) {
+            // Nothing on the server to undo - just drop it out of the
+            // local queue, which works with no connection at all.
+            await removeQueuedPhoto(photo.id);
+          } else {
+            await deleteSyncedPhoto(photo);
+          }
+        } catch (err) {
+          // Nothing changed, so there's nothing to re-read - and going
+          // to the network here would make the user wait out a timeout
+          // before being told why the last attempt didn't work.
+          photoError = err.message || 'Could not remove this photo. Try again.';
+          drawView();
+          return;
+        }
+
+        await loadPhotos();
+        drawView();
       });
     }
 

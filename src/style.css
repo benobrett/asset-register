@@ -804,6 +804,25 @@ button[type='submit']:active {
   align-content: start;
 }
 
+.asset-detail-photo-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  align-items: start;
+}
+
+.photo-panel-actions {
+  flex-wrap: wrap;
+}
+
+/* Out of edit mode the thumbnail is a button that opens the viewer; in
+   edit mode it's disabled so the tap can't compete with Remove. It still
+   has to look like a photo rather than a greyed-out control. */
+.photo-thumb-button:disabled {
+  opacity: 1;
+  cursor: default;
+}
+
 /* The thumbnail is the button, so the whole tile is the tap target
    rather than some smaller region inside it. */
 .photo-thumb-button {
