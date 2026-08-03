@@ -23,7 +23,11 @@
   --color-primary-hover: #93a022;
   --color-primary-active: #747e1b;
   --color-primary-soft: rgba(181, 196, 41, 0.22);
-  --color-primary-text: #266c5c;
+  /* Button label on the green fill. Was #266c5c, which measures 3.2:1
+     against --color-primary - under AA for text this size, and the
+     primary action on every screen. This deeper teal (the logo's, taken
+     darker) reads as the same family and measures 6.2:1. */
+  --color-primary-text: #003d4a;
   /* This green is too light to use as text on a light background (fails
      contrast) — use this darker variant of the same hue wherever the
      color is needed as text/ink rather than a button fill. */
@@ -50,8 +54,44 @@
   --color-danger-hover: #942019;
   --color-danger-text: #ffffff;
 
+  /* Sanctuary palette, sampled straight out of the logo file rather than
+     guessed at: the bird and wordmark are #005568, the leaves #b5c428
+     (which --color-primary above already matches). Everything on the login
+     screen derives from these two, so the screen and the mark can't drift
+     apart. --deep is the same hue taken darker, for text on the green and
+     for the bottom of the background field - #005568 itself only reaches
+     4.4:1 on --color-primary, just under AA. */
+  --color-sanctuary: #005568;
+  --color-sanctuary-deep: #003d4a;
+  --color-sanctuary-dark: #00323d;
+  /* The same teal used as *text* (the wordmark on the card), kept as its
+     own token because the two diverge in dark mode: the background field
+     stays deep in both themes, but #005568 as type on a dark card is
+     unreadable and has to lift. */
+  --color-sanctuary-ink: #005568;
+
+  /* Spacing rhythm. Everything on the login screen is a step on this
+     scale, so vertical relationships stay proportional instead of being
+     nudged per element. Other views still use ad-hoc rem values; the
+     intent is that they move onto this over time. */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+
+  /* Type scale. --text-base is deliberately above the 1rem the rest of the
+     app uses: this is read outdoors, in glare, often by older eyes. */
+  --text-sm: 0.9375rem;
+  --text-base: 1.0625rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.75rem;
+
   --radius-sm: 0.6rem;
   --radius-md: 0.9rem;
+  --radius-lg: 1.25rem;
 
   --shadow-sm: 0 1px 2px rgba(16, 24, 20, 0.07), 0 1px 1px rgba(16, 24, 20, 0.04);
   --shadow-md: 0 8px 20px rgba(16, 24, 20, 0.09), 0 2px 6px rgba(16, 24, 20, 0.05);
@@ -74,7 +114,28 @@ body {
   max-width: 480px;
   margin: 0 auto;
   padding: 1.25rem 1rem 3rem;
-  min-height: 100vh;
+  /* dvh rather than vh: vh doesn't account for mobile browser chrome, so
+     it either clips or leaves a stray scrollbar. min-height, never
+     height - a locked height plus the on-screen keyboard puts fields
+     out of reach with nothing to scroll. */
+  min-height: 100dvh;
+}
+
+/* Everything here animates for feedback, not for effect, so there's
+   nothing that needs a reduced-motion alternative - just stop it. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  button:hover {
+    transform: none;
+  }
 }
 
 /* Persistent chrome, a sibling of #app rather than part of any view -
@@ -192,16 +253,74 @@ h1 {
   margin: 0;
 }
 
-.view-login {
-  text-align: center;
+/* ---------------------------------------------------------------------
+   Login screen.
+
+   The only full-bleed screen in the app, and the only one that carries
+   any visual identity - see CLAUDE.md "Design tokens". Everything below
+   is scoped to .view-login so the register, capture and detail screens
+   are untouched by it.
+   --------------------------------------------------------------------- */
+
+/* #app is a 480px column with padding, which is right for every other
+   view and wrong for this one - the background field has to reach the
+   viewport edges. Keyed off the view's own class with :has() rather than
+   a class toggled from main.js, which would make a presentation change
+   into a routing change. Chrome 105+; anywhere without :has() simply
+   keeps the old constrained column, which still works. */
+#app:has(.view-login) {
+  max-width: none;
+  padding: 0;
 }
 
-.view-login h1 {
-  font-size: 2.25rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: var(--color-primary-ink);
-  margin: 0 0 0.35rem;
+.view-login {
+  /* min-height, never height: with the height locked, opening the
+     on-screen keyboard on the tablet shrinks the viewport and pushes the
+     fields off-screen with no way to scroll to them - the form becomes
+     unusable at exactly the moment it's needed. min-height plus padding
+     lets the page scroll instead once space runs out.
+
+     dvh, not vh: vh ignores mobile browser chrome, which either clips the
+     layout or leaves a stray scrollbar. */
+  min-height: 100dvh;
+  display: flex;
+  padding: var(--space-6) var(--space-4);
+
+  /* The sanctuary at dusk: the logo's own teal, deepening downward.
+     The hairlines are the predator-proof fence - the one physical thing
+     that defines this place - at an opacity where it reads as texture
+     rather than pattern. Behind a solid card, so it can never affect the
+     contrast of anything anyone has to read. */
+  background-color: var(--color-sanctuary-dark);
+  background-image: repeating-linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.075) 0 1px,
+      transparent 1px 15px
+    ),
+    linear-gradient(170deg, var(--color-sanctuary) 0%, var(--color-sanctuary-dark) 100%);
+}
+
+/* margin: auto, not the parent's align-items/justify-content: center. A
+   centred flex item that outgrows its container overflows in *both*
+   directions, and the top half becomes unreachable - which is precisely
+   the keyboard-open case above. auto margins collapse instead of going
+   negative, so the card stays scrollable to. */
+.login-card {
+  margin: auto;
+  width: 100%;
+  max-width: 26rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lift);
+  padding: var(--space-6) var(--space-5) var(--space-5);
+  /* Ties the card back to the leaves in the mark. */
+  border-top: 4px solid var(--color-primary);
+}
+
+.login-lockup {
+  text-align: center;
+  margin-bottom: var(--space-5);
 }
 
 .login-logo {
@@ -213,11 +332,25 @@ h1 {
   width: 100%;
   max-width: 349px;
   height: auto;
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-sm);
-  margin: 1rem auto 1.25rem;
+  margin: 0 auto var(--space-4);
 }
 
+/* The one bold element on the screen. Everything else is quiet. */
+.view-login h1 {
+  font-size: var(--text-xl);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--color-sanctuary-ink);
+  margin: 0;
+  /* Reads as part of the lockup rather than a heading that happens to sit
+     under a picture. */
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+/* Shared with forgotPassword, resetPassword and completeProfile - leave
+   this rule alone; the login screen's version is the scoped override
+   below. */
 .login-welcome {
   max-width: 480px;
   color: var(--color-text-muted);
@@ -225,8 +358,45 @@ h1 {
   line-height: 1.5;
 }
 
+/* Full --color-text, not the muted grey: this is read outdoors in glare,
+   where grey-on-white is the first thing to disappear. */
+.view-login .login-welcome {
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  text-align: center;
+  margin: 0 0 var(--space-5);
+  line-height: 1.55;
+}
+
+/* The card is the card; the form inside it must not be a second one. */
 .view-login form {
+  background: none;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+  max-width: none;
+  gap: var(--space-4);
   text-align: left;
+}
+
+/* Larger than the app default, deliberately: read outdoors, in glare,
+   often by older eyes, and tapped with a finger rather than clicked. */
+.view-login label {
+  font-size: var(--text-sm);
+  color: var(--color-text);
+}
+
+.view-login input {
+  font-size: var(--text-base);
+  min-height: 3rem;
+  padding: var(--space-3);
+  border-color: var(--color-border-strong);
+}
+
+.view-login button[type='submit'] {
+  font-size: var(--text-base);
+  min-height: 3rem;
+  margin-top: var(--space-1);
 }
 
 /* Buttons default to inline-block, so two siblings would otherwise sit
@@ -237,8 +407,15 @@ h1 {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.25rem;
-  margin-top: 0.5rem;
+  gap: var(--space-1);
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+
+.view-login .link-button {
+  font-size: var(--text-sm);
+  min-height: 2.75rem;
 }
 
 h2 {
@@ -411,12 +588,17 @@ button[type='submit']:active {
 }
 
 /* Plain text links: back-nav and inline "Edit" actions. Deliberately
-   lighter-weight than a real button. */
+   lighter-weight than a real button.
+
+   --color-primary-ink, not --color-primary: the green is a fill colour
+   and measures 1.9:1 as text on a light background, which is the note
+   already sitting on the token at the top of this file. Same hue, dark
+   enough to read (6.6:1). */
 .link-button {
   background: none;
   border-color: transparent;
   box-shadow: none;
-  color: var(--color-primary);
+  color: var(--color-primary-ink);
   font-weight: 500;
   padding: 0.5rem 0.25rem;
 }
@@ -425,7 +607,7 @@ button[type='submit']:active {
   background: none;
   box-shadow: none;
   transform: none;
-  color: var(--color-primary-hover);
+  color: var(--color-primary-ink);
   text-decoration: underline;
 }
 
@@ -1302,8 +1484,25 @@ button[type='submit']:active {
     --color-primary-hover: #c7d84f;
     --color-primary-active: #93a022;
     --color-primary-soft: rgba(181, 196, 41, 0.28);
-    --color-primary-text: #266c5c;
+    /* Same fix, same reason as the light theme: the fill is identical in
+       both, so the label on it has to be too. */
+    --color-primary-text: #003d4a;
     --color-primary-ink: #c3d43a;
+
+    /* Only the ink lifts. --color-sanctuary itself is the background
+       field, which is deep in both themes - overriding that one here
+       turned the whole screen pale blue. */
+    --color-sanctuary-ink: #7fd4e8;
+  }
+
+  /* The logo file is opaque with a white background, so on a dark card it
+     is a white rectangle whatever we do. Rounding it and giving it a
+     little breathing room makes that read as a printed plate rather than
+     an image that failed to load. */
+  .login-logo {
+    background: #ffffff;
+    border-radius: var(--radius-sm);
+    padding: var(--space-3);
 
     --color-error: #ff6b60;
     --color-error-soft: rgba(255, 107, 96, 0.12);
