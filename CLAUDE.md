@@ -96,6 +96,31 @@ There's no component framework, so every view follows the same shape: a function
 
 `confirmDialog({ message })` is the one shared UI primitive outside this pattern: it builds its own backdrop/modal, appends it to `document.body` directly (not into a view's `container`), and returns a Promise that resolves `true` on confirm or `false` on cancel/backdrop-click/Escape. Views awaiting it don't need to render or tear down anything themselves.
 
+### Design tokens
+`style.css`'s `:root` is the single source of truth for colour, spacing and type. Use a token; don't hardcode a value next to one.
+
+**Sanctuary palette.** `--color-sanctuary` (`#005568`) and `--color-primary` (`#b5c429`) are **sampled out of `src/assets/brook-waimarama-sanctuary-logo.png`**, not chosen to sit near it — the bird and wordmark are the first, the leaves the second. If the logo is ever replaced, re-sample rather than eyeballing. `--color-sanctuary-deep`/`-dark` are the same hue taken darker (text on the green, and the bottom of the login background field).
+
+`--color-sanctuary-ink` is deliberately a *separate* token from `--color-sanctuary` even though they hold the same value in light mode: the background field stays deep in both themes, but the teal used as **type** has to lift to a pale variant in dark mode. Overriding the one token for both is exactly the bug that turned the whole login screen pale blue during this work.
+
+**Two tokens carry a measured contrast decision** — don't "simplify" either back:
+- `--color-primary-text` (`#003d4a`) is the label on a `--color-primary` fill. The previous `#266c5c` measured **3.2:1**, under AA for text at button size, on the primary action of every screen. This is 6.2:1.
+- `.link-button` uses `--color-primary-ink`, not `--color-primary`. The green is a *fill* colour and measures **1.9:1** as text on a light background — the note has been sitting on the token since it was introduced.
+
+**Spacing** is `--space-1` … `--space-7` (0.25rem → 3rem). **Type** is `--text-sm` … `--text-xl`; `--text-base` is `1.0625rem`, deliberately above the 1rem the rest of the app uses, because this is read outdoors in glare and often by older eyes.
+
+The login screen is fully on these tokens; the other views still use ad-hoc rem values and should move across as they're touched. That's the intended direction, not a licence to restyle a view you're only visiting for a bug fix.
+
+### The login screen is the only full-bleed view
+Every other view renders into `#app`, a 480px column with padding. The login background field has to reach the viewport edges, so `style.css` widens it with `#app:has(.view-login)` rather than a class toggled from `main.js` — that would turn a presentation change into a routing one. Chrome 105+; without `:has()` the screen simply keeps the constrained column and still works.
+
+Three things there are load-bearing:
+- **`min-height: 100dvh`, never `height`.** A locked height plus the tablet's on-screen keyboard pushes the fields off-screen with nothing to scroll — the form becomes unusable at exactly the moment it's needed. `dvh` rather than `vh` because `vh` ignores mobile browser chrome and either clips or leaves a stray scrollbar. `#app` itself uses `min-height: 100dvh` for the same reason.
+- **The card centres with `margin: auto`, not the parent's `align-items`/`justify-content: center`.** A centred flex item that outgrows its container overflows in *both* directions and its top becomes unreachable — the same keyboard case. Auto margins collapse instead of going negative.
+- **`.login-welcome` is shared** with `forgotPassword`, `resetPassword` and `completeProfile`. The login screen's version is a scoped `.view-login .login-welcome` override; changing the base rule silently restyles three other views.
+
+`login.spec.js` covers both layout traps (short viewport, and horizontal overflow from 320px to 1024px) — they're invisible on a desktop and fatal on the tablet.
+
 ### Overlays and stacking order
 Two shared overlays append themselves to `document.body` rather than rendering into a view — `confirmDialog.js` and `lightbox.js` (the full-screen photo viewer). The order between them and the chrome is **set explicitly in `style.css`, not left to DOM order**:
 
