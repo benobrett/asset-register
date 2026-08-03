@@ -52,6 +52,20 @@ export default [
     },
   },
   {
+    // The pure half of the Storage cleanup function. Plain ESM with no
+    // platform globals at all, deliberately - it's imported by Deno in the
+    // Edge Function and by Vitest in tests/, so it can't lean on either.
+    // The Deno entry point beside it is .ts and isn't linted here; this
+    // project has no TypeScript toolchain, and adding one for a single
+    // out-of-band file isn't worth it.
+    files: ['supabase/functions/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'module',
+      globals: {},
+    },
+  },
+  {
     ignores: ['dist/**', 'node_modules/**'],
   },
 ];

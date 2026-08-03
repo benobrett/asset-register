@@ -1,0 +1,111 @@
+# cleanup-orphaned-photos
+
+A scheduled sweep that removes Storage objects nothing points at any more.
+
+Nothing in this directory is deployed by CI. Like `migrations/`, it's applied
+by hand — see "Deploying" below.
+
+## Why it exists
+
+Files accumulate in the `asset-photos` bucket with no `asset_photos` row
+referencing them, from two accepted trade-offs (both explained in CLAUDE.md):
+
+1. **Asset deletion.** `asset_photos` has `on delete cascade` on `asset_id`,
+   so deleting an asset drops its photo rows at the database level without
+   touching the files behind them.
+2. **Partial photo deletion.** `deleteSyncedPhoto()` deletes the row *first*
+   and the Storage object second, on purpose — the other order leaves a
+   thumbnail pointing at a missing file if the second step fails. This order
+   fails to an invisible orphan instead.
+
+Neither is harmful. It's a storage bill that creeps up, which is why this is
+a periodic sweep rather than anything inline.
+
+## Why an Edge Function, in a project with no server
+
+This is the only part of the project that runs outside the browser and
+outside Postgres, so it's worth saying why it isn't SQL. Deleting a Storage
+object needs the Storage API: removing the `storage.objects` row from SQL
+leaves the bytes in the backing store — the same orphan, one level down.
+
+The alternative was `pg_cron` + `pg_net` calling the Storage API from
+Postgres, which would have kept everything in the database. It was rejected
+on the practical hazard CLAUDE.md already records: SQL that has to travel
+through a non-terminal channel to reach the SQL editor has repeatedly had
+its quoting mangled, and that route needs request bodies full of quotes plus
+a service-role credential in Vault. This way the credential is an
+environment variable set through the dashboard and never appears in a
+statement anyone has to paste anywhere.
+
+## Safety
+
+This is the only code in the project that deletes files it wasn't explicitly
+pointed at, so it's built to refuse rather than guess:
+
+- **A grace period** (24h by default). `sync.js` uploads an object *before*
+  inserting its `asset_photos` row, so a healthy photo has no row for a
+  moment — and for however long a device stays offline if that insert fails
+  and the queue has to retry. Anything newer than the grace period is left
+  alone.
+- **Undateable objects are kept.** No usable `created_at` means no way to
+  tell a long-dead orphan from a photo uploaded a second ago.
+- **It aborts if `asset_photos` returns no rows while the bucket has
+  objects** (409). That's the signature of a misconfiguration — wrong
+  project, renamed table, a policy change — and acting on it would empty the
+  bucket.
+- **`?dryRun=true`** reports what it would delete and deletes nothing. Use
+  it for the first run against any project.
+- **A dedicated `CLEANUP_SECRET`**, not the service role key, authorises a
+  call — so whatever schedules this doesn't hold a credential that can do
+  anything at all to the database, and rotating one doesn't touch the other.
+
+`orphans.js` holds the decision logic as a pure function with no Deno,
+Supabase or network in it, unit tested in `tests/orphans.test.js`. `index.ts`
+does the listing, querying and deleting around it.
+
+## Deploying
+
+Needs the [Supabase CLI](https://supabase.com/docs/guides/cli) — this is the
+only thing in the project that does.
+
+```bash
+supabase login
+supabase link --project-ref <your-project-ref>
+supabase functions deploy cleanup-orphaned-photos
+```
+
+Then set the secrets (`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are
+injected automatically; only the cleanup secret needs setting):
+
+```bash
+supabase secrets set CLEANUP_SECRET="$(openssl rand -hex 32)"
+```
+
+**Never put that value, or the service role key, in this repository.**
+
+## Scheduling
+
+Supabase Dashboard → **Integrations → Cron** → *Create job*:
+
+- Schedule: `0 3 * * 0` (weekly, 03:00 Sunday) is plenty — orphans are not
+  urgent.
+- Type: **Supabase Edge Function**, `cleanup-orphaned-photos`.
+- Add an HTTP header `x-cleanup-secret` with the value set above.
+
+## Running it by hand
+
+```bash
+# See what it would do, without deleting anything.
+curl -s -H "x-cleanup-secret: $CLEANUP_SECRET" \
+  "https://<project-ref>.supabase.co/functions/v1/cleanup-orphaned-photos?dryRun=true"
+
+# For real.
+curl -s -H "x-cleanup-secret: $CLEANUP_SECRET" \
+  "https://<project-ref>.supabase.co/functions/v1/cleanup-orphaned-photos"
+```
+
+Response: `{ scanned, referenced, deleted }`, or the same with
+`dryRun: true` and a `paths` array.
+
+`gracePeriodMs` can be overridden per call — useful in the e2e project,
+where a test's leftovers are minutes old rather than days.
