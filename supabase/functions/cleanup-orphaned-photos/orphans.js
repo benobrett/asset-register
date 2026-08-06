@@ -55,6 +55,38 @@ export function selectOrphans({
     .map((object) => object.path);
 }
 
+/**
+ * The mirror image: rows in asset_photos whose file isn't in the bucket.
+ *
+ * Nothing deletes these - it's a read-only diagnostic - but they matter,
+ * because they're the one failure the app actually *shows*. Supabase will
+ * happily sign a URL for a path that doesn't exist, so detail.js can't
+ * filter them out and the user gets a broken image.
+ *
+ * No grace period here, unlike selectOrphans. sync.js uploads the object
+ * before inserting the row, so a healthy photo never passes through a
+ * state where the row exists and the file doesn't - which makes any
+ * instance of it worth reporting immediately rather than waiting out a
+ * window that will never close.
+ *
+ * @param {object} args
+ * @param {Array<{path: string}>} args.objects Everything in the bucket.
+ * @param {Iterable<string>} args.referencedPaths Every storage_path.
+ * @returns {string[]} referenced paths with no object behind them.
+ */
+export function selectMissingObjects({ objects, referencedPaths }) {
+  const present = new Set((objects ?? []).map((object) => object?.path).filter(Boolean));
+  const seen = new Set();
+
+  return [...referencedPaths].filter((path) => {
+    // A path can legitimately be referenced twice (two rows, same file);
+    // report it once.
+    if (!path || present.has(path) || seen.has(path)) return false;
+    seen.add(path);
+    return true;
+  });
+}
+
 function toMillis(value) {
   if (value === null || value === undefined) return null;
   const ms = value instanceof Date ? value.getTime() : Date.parse(value);

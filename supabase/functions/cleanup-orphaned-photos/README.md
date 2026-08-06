@@ -68,9 +68,39 @@ pointed at, so it's built to refuse rather than guess:
   call — so whatever schedules this doesn't hold a credential that can do
   anything at all to the database, and rotating one doesn't touch the other.
 
-`orphans.js` holds the decision logic as a pure function with no Deno,
-Supabase or network in it, unit tested in `tests/orphans.test.js`. `index.ts`
-does the listing, querying and deleting around it.
+`orphans.js` holds the decision logic as pure functions with no Deno,
+Supabase or network in them, unit tested in `tests/orphans.test.js`.
+`index.ts` does the listing, querying and deleting around them.
+
+## Drift goes both ways — `?report=true`
+
+This function only ever deletes **files with no row**. The mirror image —
+a **row with no file** — is the one a user actually notices: Supabase
+issues a signed URL for a path that doesn't exist quite happily, so
+`detail.js` can't filter it out and it renders as a broken image.
+
+`?report=true` is a read-only diagnostic covering both directions:
+
+```json
+{
+  "report": true,
+  "objects": 258,
+  "referenced": 1,
+  "filesWithNoRow": { "count": 258, "paths": ["..."] },
+  "rowsWithNoFile": { "count": 1,   "paths": ["..."] }
+}
+```
+
+It deletes nothing and takes no guards — not the empty-register check
+either, since refusing to answer would hide exactly the state someone is
+asking about. `rowsWithNoFile` has no grace period applied, deliberately:
+`sync.js` uploads the object *before* inserting the row, so a healthy
+photo never passes through that state and any instance is worth seeing
+immediately.
+
+Nothing here fixes `rowsWithNoFile` — deciding what to do with one is a
+judgement call (delete the row, or re-upload the photo), not something a
+scheduled job should guess at.
 
 ## Deploying
 
@@ -144,6 +174,7 @@ curl -s -H "Authorization: Bearer $ANON" -H "x-cleanup-secret: $SECRET" "$URL"
 Response: `{ scanned, referenced, deleted }`, or the same with
 `dryRun: true` and a `paths` array.
 
-Query parameters: `dryRun`, `allowEmptyRegister` (see "Safety"), and
-`gracePeriodMs` — the last is useful in the e2e project, where a test's
-leftovers are minutes old rather than days.
+Query parameters: `dryRun`, `report` (see "Drift goes both ways"),
+`allowEmptyRegister` (see "Safety"), and `gracePeriodMs` — the last is
+useful in the e2e project, where a test's leftovers are minutes old rather
+than days.

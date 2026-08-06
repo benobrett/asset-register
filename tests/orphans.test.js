@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   selectOrphans,
+  selectMissingObjects,
   DEFAULT_GRACE_PERIOD_MS,
 } from '../supabase/functions/cleanup-orphaned-photos/orphans.js';
 
@@ -117,5 +118,64 @@ describe('selectOrphans', () => {
 
   it('does nothing with an empty bucket', () => {
     expect(selectOrphans({ objects: [], referencedPaths: [], now: NOW })).toEqual([]);
+  });
+});
+
+// The mirror image, and the one that's actually visible to a user: a
+// signed URL is issued for a path that doesn't exist, so detail.js can't
+// filter it out and it renders as a broken image.
+describe('selectMissingObjects', () => {
+  it('reports a row whose file is not in the bucket', () => {
+    const missing = selectMissingObjects({
+      objects: [{ path: 'user-1/here.jpg' }],
+      referencedPaths: ['user-1/here.jpg', 'user-1/vanished.jpg'],
+    });
+
+    expect(missing).toEqual(['user-1/vanished.jpg']);
+  });
+
+  it('says nothing when every row has its file', () => {
+    const missing = selectMissingObjects({
+      objects: [{ path: 'user-1/a.jpg' }, { path: 'user-1/b.jpg' }],
+      referencedPaths: ['user-1/a.jpg', 'user-1/b.jpg'],
+    });
+
+    expect(missing).toEqual([]);
+  });
+
+  // No grace period, unlike selectOrphans: sync.js uploads the object
+  // before inserting the row, so a healthy photo never passes through a
+  // row-without-file state. Any instance is worth reporting at once.
+  it('applies no grace period - a brand new row with no file still reports', () => {
+    const missing = selectMissingObjects({
+      objects: [],
+      referencedPaths: ['user-1/just-inserted.jpg'],
+    });
+
+    expect(missing).toEqual(['user-1/just-inserted.jpg']);
+  });
+
+  it('reports a path referenced by two rows only once', () => {
+    const missing = selectMissingObjects({
+      objects: [],
+      referencedPaths: ['user-1/shared.jpg', 'user-1/shared.jpg'],
+    });
+
+    expect(missing).toEqual(['user-1/shared.jpg']);
+  });
+
+  it('ignores malformed entries on either side', () => {
+    const missing = selectMissingObjects({
+      objects: [null, {}, { path: 'user-1/ok.jpg' }],
+      referencedPaths: ['user-1/ok.jpg', '', null, 'user-1/gone.jpg'],
+    });
+
+    expect(missing).toEqual(['user-1/gone.jpg']);
+  });
+
+  it('reports nothing when there are no rows at all', () => {
+    expect(
+      selectMissingObjects({ objects: [{ path: 'user-1/a.jpg' }], referencedPaths: [] })
+    ).toEqual([]);
   });
 });
