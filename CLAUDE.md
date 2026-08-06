@@ -219,7 +219,9 @@ Never put the Supabase *service role* key anywhere in this codebase — it bypas
 
 Two behaviors are load-bearing and easy to undo:
 - **The 24-hour grace period.** `sync.js` uploads an object *before* inserting its `asset_photos` row (the other order would leave a row pointing at a file that isn't there), so a perfectly healthy photo has no row for a moment — and for however long a device stays offline if that insert fails and the queue retries. Sweeping inside that window deletes a photo someone just took.
-- **It refuses (409) if the bucket has objects but `asset_photos` returns none.** "Nothing is referenced" and "everything here is rubbish" look identical from inside the function, and only one of them is ever true in practice; the other is a wrong project or a broken query, and acting on it would empty the bucket.
+- **It refuses (409) if the bucket has objects but `asset_photos` returns none.** "Nothing is referenced" and "everything here is rubbish" look identical from inside the function, and the usual explanation is a wrong project or a broken query — acting on it would empty the bucket. The **e2e project is the legitimate exception**: every spec deletes the asset it created, the cascade takes the photo rows, and zero rows beside a bucket of stranded files is its normal steady state. `?allowEmptyRegister=true` asserts that deliberately, and disables only this check.
+
+Calling it needs **two** headers, which is the thing most likely to waste someone's afternoon: `Authorization: Bearer <anon key>` (Supabase's gateway enforces `verify_jwt` before the function runs at all) *and* `x-cleanup-secret`. Miss the first and the platform returns its own 401 that reads almost identically to the function's — tell them apart by the body, `{"code":...}` from the platform versus `{"error":"Unauthorized"}` from the function.
 
 ## Authentication
 Email/password via Supabase Auth (`supabase.auth.signUp` / `signInWithPassword`, in `src/auth.js`), used from `src/views/login.js`:
@@ -282,6 +284,10 @@ Thumbnails are a **fixed-size** grid with `object-fit: cover`, so a portrait and
 `.env` (gitignored) holds `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`. Vite exposes these to client code via `import.meta.env`. `.env.example` documents both names with empty values — copy it to `.env` and fill them in.
 
 `.env.e2e` (gitignored) is the same two keys plus `E2E_TEST_EMAIL`/`E2E_TEST_PASSWORD` and `E2E_INCOMPLETE_PROFILE_EMAIL`/`E2E_INCOMPLETE_PROFILE_PASSWORD`, pointed at a **separate** Supabase project — see "Testing conventions" for why this can't just reuse `.env`. `.env.e2e.example` documents it the same way.
+
+`.env.cleanup` (gitignored) holds only `CLEANUP_SECRET`, and is **not** an app env var — nothing in `src/` reads it and no build touches it. It exists so the value can be handed to `supabase secrets set --env-file .env.cleanup` without ever being typed into a shell history or a chat window; the function reads it from its own Supabase environment at runtime. See "Storage cleanup". `.env.cleanup.example` documents the name.
+
+`supabase/.temp/` (gitignored) is written by `supabase link` and holds a local CLI session. `supabase/config.toml` beside it **is** committed — that's project configuration, not a credential.
 
 ## Testing conventions
 **Vitest** (`tests/`) covers pure logic — validation, formatting, the offline queue. **Playwright** (`e2e/`) covers user-facing flows end to end in a real (Chromium) browser. Any PR that adds or changes a user-facing flow includes or updates an e2e spec; a bug fix to an existing flow should add the spec that would have caught the bug. Pure-logic changes need Vitest only.

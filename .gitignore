@@ -8,3 +8,15 @@ e2e/.auth/
 playwright-report/
 test-results/
 blob-report/
+
+# Supabase CLI — needed only to deploy the Storage cleanup Edge Function.
+# See supabase/functions/cleanup-orphaned-photos/README.md.
+#
+# CLEANUP_SECRET authorises a call to that function, and is fed to
+# `supabase secrets set --env-file .env.cleanup`. Like .env and .env.e2e
+# above, it never belongs in the repository.
+.env.cleanup
+# Written by `supabase link`: holds the linked project ref and a CLI
+# session. supabase/config.toml, beside it, IS committed — that's the
+# project's own configuration rather than a local credential.
+supabase/.temp/

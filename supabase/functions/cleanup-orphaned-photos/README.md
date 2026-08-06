@@ -50,9 +50,18 @@ pointed at, so it's built to refuse rather than guess:
 - **Undateable objects are kept.** No usable `created_at` means no way to
   tell a long-dead orphan from a photo uploaded a second ago.
 - **It aborts if `asset_photos` returns no rows while the bucket has
-  objects** (409). That's the signature of a misconfiguration — wrong
-  project, renamed table, a policy change — and acting on it would empty the
-  bucket.
+  objects** (409). That's usually the signature of a misconfiguration —
+  wrong project, renamed table, a policy change — and acting on it would
+  empty the bucket.
+
+  It isn't always wrong, though. The **e2e project reaches this state
+  legitimately**: every spec deletes the asset it created, and the cascade
+  takes the photo rows with it, so zero rows plus a bucket full of stranded
+  files is the normal steady state there. Re-run with
+  **`?allowEmptyRegister=true`** to assert that the register really is
+  empty. It's opt-in, named for what it asserts rather than `force`, and
+  turns off *only* this check — the grace period and the undateable-object
+  rule still apply.
 - **`?dryRun=true`** reports what it would delete and deletes nothing. Use
   it for the first run against any project.
 - **A dedicated `CLEANUP_SECRET`**, not the service role key, authorises a
@@ -74,14 +83,21 @@ supabase link --project-ref <your-project-ref>
 supabase functions deploy cleanup-orphaned-photos
 ```
 
-Then set the secrets (`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are
-injected automatically; only the cleanup secret needs setting):
+Then set the secret. `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are
+injected automatically; only the cleanup secret needs setting.
+
+Generate it into `.env.cleanup` (gitignored) and set it from there, rather
+than passing it on the command line — an inline value ends up in shell
+history, and you need to keep a copy anyway to configure the cron job and
+to call the function by hand:
 
 ```bash
-supabase secrets set CLEANUP_SECRET="$(openssl rand -hex 32)"
+node -e "console.log('CLEANUP_SECRET=' + require('crypto').randomBytes(32).toString('hex'))" > .env.cleanup
+supabase secrets set --env-file .env.cleanup
 ```
 
 **Never put that value, or the service role key, in this repository.**
+`.env.cleanup` is gitignored for the same reason `.env` is.
 
 ## Scheduling
 
@@ -92,20 +108,42 @@ Supabase Dashboard → **Integrations → Cron** → *Create job*:
 - Type: **Supabase Edge Function**, `cleanup-orphaned-photos`.
 - Add an HTTP header `x-cleanup-secret` with the value set above.
 
+## Two headers are required, not one
+
+Easy to lose an hour to. Supabase's gateway enforces `verify_jwt` **before
+the function runs at all**, so a request with only `x-cleanup-secret` is
+rejected by the platform with
+`{"code":"UNAUTHORIZED_NO_AUTH_HEADER"}` — which looks exactly like the
+function's own 401 and isn't.
+
+Every call needs both:
+
+- `Authorization: Bearer <anon/publishable key>` — satisfies the platform.
+- `x-cleanup-secret: <CLEANUP_SECRET>` — satisfies the function.
+
+That's defence in depth rather than redundancy: the anon key is public, so
+it gates nothing on its own; the secret is what actually authorises the
+sweep. To tell the two 401s apart, check the body — the platform returns a
+`code` field, the function returns `{"error":"Unauthorized"}`.
+
 ## Running it by hand
 
 ```bash
+SECRET=$(grep '^CLEANUP_SECRET=' .env.cleanup | cut -d= -f2)
+ANON=<your publishable/anon key>
+URL="https://<project-ref>.supabase.co/functions/v1/cleanup-orphaned-photos"
+
 # See what it would do, without deleting anything.
-curl -s -H "x-cleanup-secret: $CLEANUP_SECRET" \
-  "https://<project-ref>.supabase.co/functions/v1/cleanup-orphaned-photos?dryRun=true"
+curl -s -H "Authorization: Bearer $ANON" -H "x-cleanup-secret: $SECRET" \
+  "$URL?dryRun=true"
 
 # For real.
-curl -s -H "x-cleanup-secret: $CLEANUP_SECRET" \
-  "https://<project-ref>.supabase.co/functions/v1/cleanup-orphaned-photos"
+curl -s -H "Authorization: Bearer $ANON" -H "x-cleanup-secret: $SECRET" "$URL"
 ```
 
 Response: `{ scanned, referenced, deleted }`, or the same with
 `dryRun: true` and a `paths` array.
 
-`gracePeriodMs` can be overridden per call — useful in the e2e project,
-where a test's leftovers are minutes old rather than days.
+Query parameters: `dryRun`, `allowEmptyRegister` (see "Safety"), and
+`gracePeriodMs` — the last is useful in the e2e project, where a test's
+leftovers are minutes old rather than days.

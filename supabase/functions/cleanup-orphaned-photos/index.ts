@@ -41,6 +41,11 @@ Deno.serve(async (request: Request) => {
   const url = new URL(request.url);
   const dryRun = url.searchParams.get('dryRun') === 'true';
   const gracePeriodMs = Number(url.searchParams.get('gracePeriodMs') ?? DEFAULT_GRACE_PERIOD_MS);
+  // Opt out of the empty-register guard below, and *only* that guard - the
+  // grace period and the undateable-object rule still apply. Needed because
+  // an empty register is genuinely normal in the e2e project, where every
+  // spec deletes the asset it created.
+  const allowEmptyRegister = url.searchParams.get('allowEmptyRegister') === 'true';
 
   const supabase = createClient(
     Deno.env.get('SUPABASE_URL')!,
@@ -62,12 +67,19 @@ Deno.serve(async (request: Request) => {
     // a misconfiguration - wrong project, renamed table, a policy change
     // that made the select return nothing - and acting on it would empty
     // the bucket. Refuse and let a human look.
-    if (objects.length > 0 && referencedPaths.length === 0) {
+    //
+    // It is not *always* wrong, though: the e2e project reaches exactly
+    // this state legitimately, because every spec deletes the asset it
+    // created and the cascade takes the photo rows with it. Hence the
+    // override - opt-in, named for what it asserts rather than "force",
+    // and narrow enough that it can't switch off anything else.
+    if (objects.length > 0 && referencedPaths.length === 0 && !allowEmptyRegister) {
       return json(
         {
           error:
             'Refusing to run: the bucket has objects but asset_photos returned no rows. ' +
-            'That is far more likely to be a misconfiguration than a genuinely empty register.',
+            'That is far more likely to be a misconfiguration than a genuinely empty register. ' +
+            'If the register really is empty, re-run with allowEmptyRegister=true.',
           scanned: objects.length,
         },
         409
