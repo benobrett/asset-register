@@ -1005,6 +1005,31 @@ button[type='submit']:active {
   cursor: default;
 }
 
+/* A photo the register still has a row for but whose file can't be
+   signed - deleted underneath us, or a Storage permission problem. It
+   takes the tile rather than vanishing, because vanishing is what made
+   issue #97 invisible: it looked identical to an asset with no photo, so
+   nobody could report what they couldn't see. Not a button; there's
+   nothing to open. */
+.photo-thumb-unavailable {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  text-align: center;
+  padding: 0.5rem;
+  background: var(--color-surface-alt);
+  border: 1px dashed var(--color-border-strong);
+  color: var(--color-text-muted);
+  font-size: 0.75rem;
+  line-height: 1.25;
+}
+
+.photo-unavailable-text {
+  max-width: 100%;
+}
+
 /* The thumbnail is the button, so the whole tile is the tap target
    rather than some smaller region inside it. */
 .photo-thumb-button {

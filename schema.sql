@@ -260,10 +260,19 @@ create index profiles_missing_name_idx on profiles (id) where first_name is null
 -- policies above - creating the asset-photos bucket itself grants no
 -- access at all by default. Same shared-register pattern as the other
 -- tables: any logged-in user can upload/read/replace/delete any photo.
--- (Documented here retroactively - this already existed on the
--- production project, set up directly in the dashboard before schema.sql
--- tracked it, and was only written down when the separate e2e Supabase
--- project needed the same setup and had none of it.)
+--
+-- This block used to claim the policy "already existed on the production
+-- project, set up directly in the dashboard". It did not. Production had
+-- RLS enabled on storage.objects with zero policies, so every photo
+-- upload had been failing with a 403 since the beginning and the bucket
+-- was empty - issue #97, fixed by migration 0007. Only the e2e project
+-- ever had this, from migrations/e2e-storage-policy.sql, which is why
+-- the Playwright suite could assert photos reach Storage and pass.
+--
+-- `for all` is deliberate: an owner-scoped delete would break photo
+-- removal for anyone who didn't upload the file - the same bug in a
+-- different action. The bucket must stay private; a public bucket would
+-- "fix" access by removing it.
 create policy "Logged-in users can manage asset photos"
   on storage.objects for all
   using (bucket_id = 'asset-photos' and auth.uid() is not null)
