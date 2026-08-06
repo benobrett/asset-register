@@ -35,11 +35,18 @@ Deno.serve(async (request: Request) => {
     return json({ error: 'Unauthorized' }, 401);
   }
 
-  // dryRun reports what it would delete and deletes nothing. The first run
-  // against a real bucket should always use it - this is the only code in
-  // the project that deletes files it wasn't explicitly pointed at.
   const url = new URL(request.url);
-  const dryRun = url.searchParams.get('dryRun') === 'true';
+  // Deleting is opt-in. This started out the other way round - delete by
+  // default, ?dryRun=true to hold back - and that is a trap, learned the
+  // hard way: a caller asking for ?report=true against a deployment too
+  // old to know that parameter had it silently ignored, and got a live
+  // destructive run instead of the read-only one it asked for. Nothing was
+  // lost, because there happened to be no orphans, but only because of
+  // that. With the default this way round, every version mismatch, typo
+  // and forgotten flag fails safe: the worst outcome is a report nobody
+  // asked for. dryRun= is still accepted so older callers keep working,
+  // but it is now the default rather than something to remember.
+  const apply = url.searchParams.get('apply') === 'true';
   const gracePeriodMs = Number(url.searchParams.get('gracePeriodMs') ?? DEFAULT_GRACE_PERIOD_MS);
   // Opt out of the empty-register guard below, and *only* that guard - the
   // grace period and the undateable-object rule still apply. Needed because
@@ -116,13 +123,14 @@ Deno.serve(async (request: Request) => {
       gracePeriodMs,
     });
 
-    if (dryRun) {
+    if (!apply) {
       return json({
         dryRun: true,
         scanned: objects.length,
         referenced: referencedPaths.length,
         orphaned: orphans.length,
         paths: orphans,
+        hint: 'Nothing was deleted. Re-run with apply=true to delete these.',
       });
     }
 
