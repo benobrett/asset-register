@@ -219,7 +219,9 @@ Never put the Supabase *service role* key anywhere in this codebase — it bypas
 
 Two behaviors are load-bearing and easy to undo:
 - **The 24-hour grace period.** `sync.js` uploads an object *before* inserting its `asset_photos` row (the other order would leave a row pointing at a file that isn't there), so a perfectly healthy photo has no row for a moment — and for however long a device stays offline if that insert fails and the queue retries. Sweeping inside that window deletes a photo someone just took.
-- **It refuses (409) if the bucket has objects but `asset_photos` returns none.** "Nothing is referenced" and "everything here is rubbish" look identical from inside the function, and only one of them is ever true in practice; the other is a wrong project or a broken query, and acting on it would empty the bucket.
+- **It refuses (409) if the bucket has objects but `asset_photos` returns none.** "Nothing is referenced" and "everything here is rubbish" look identical from inside the function, and the usual explanation is a wrong project or a broken query — acting on it would empty the bucket. The **e2e project is the legitimate exception**: every spec deletes the asset it created, the cascade takes the photo rows, and zero rows beside a bucket of stranded files is its normal steady state. `?allowEmptyRegister=true` asserts that deliberately, and disables only this check.
+
+Calling it needs **two** headers, which is the thing most likely to waste someone's afternoon: `Authorization: Bearer <anon key>` (Supabase's gateway enforces `verify_jwt` before the function runs at all) *and* `x-cleanup-secret`. Miss the first and the platform returns its own 401 that reads almost identically to the function's — tell them apart by the body, `{"code":...}` from the platform versus `{"error":"Unauthorized"}` from the function.
 
 ## Authentication
 Email/password via Supabase Auth (`supabase.auth.signUp` / `signInWithPassword`, in `src/auth.js`), used from `src/views/login.js`:
