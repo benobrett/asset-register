@@ -58,10 +58,13 @@ export function selectOrphans({
 /**
  * The mirror image: rows in asset_photos whose file isn't in the bucket.
  *
- * Nothing deletes these - it's a read-only diagnostic - but they matter,
- * because they're the one failure the app actually *shows*. Supabase will
- * happily sign a URL for a path that doesn't exist, so detail.js can't
- * filter them out and the user gets a broken image.
+ * Nothing deletes these - it's a read-only diagnostic - and they matter
+ * precisely because the app *doesn't* show them. createSignedUrls returns
+ * a per-path error with a null URL for a missing object, which
+ * getPhotoUrls and detail.js both filter out, so the asset reads as
+ * "No photos yet." A photo that silently ceases to exist is worse than
+ * one that visibly breaks: nobody reports it, so the only way to find out
+ * is to go and ask, which is what this is for.
  *
  * No grace period here, unlike selectOrphans. sync.js uploads the object
  * before inserting the row, so a healthy photo never passes through a

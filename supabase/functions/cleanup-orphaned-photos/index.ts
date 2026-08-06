@@ -84,9 +84,10 @@ Deno.serve(async (request: Request) => {
         // Files with nothing pointing at them: what a real run deletes.
         filesWithNoRow: { count: orphaned.length, paths: orphaned },
         // Rows pointing at nothing: the mirror image, which this function
-        // does *not* fix. It's the one that's actually visible to a user -
-        // a signed URL is issued happily for a path that doesn't exist, so
-        // it renders as a broken image rather than being filtered out.
+        // does *not* fix. Invisible in the app - a missing object gets a
+        // per-path error from createSignedUrls, which detail.js filters
+        // out, so the asset just reads "No photos yet." That silence is
+        // the reason to report it: nobody is going to notice and tell you.
         rowsWithNoFile: { count: missing.length, paths: missing },
       });
     }

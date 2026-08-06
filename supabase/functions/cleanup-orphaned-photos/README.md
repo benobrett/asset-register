@@ -85,9 +85,15 @@ Supabase or network in them, unit tested in `tests/orphans.test.js`.
 ## Drift goes both ways — `?report=true`
 
 This function only ever deletes **files with no row**. The mirror image —
-a **row with no file** — is the one a user actually notices: Supabase
-issues a signed URL for a path that doesn't exist quite happily, so
-`detail.js` can't filter it out and it renders as a broken image.
+a **row with no file** — it leaves alone, and **neither direction is
+visible in the app**. `createSignedUrls` returns a per-path `error` and a
+null URL for a missing object, which `getPhotoUrls` and `detail.js` both
+filter out, so the asset reads "No photos yet." rather than showing a
+broken image.
+
+That silence is the point. A photo that quietly ceases to exist is worse
+than one that visibly breaks, because nobody reports it — so the only way
+to find out is to go and ask.
 
 `?report=true` is a read-only diagnostic covering both directions:
 

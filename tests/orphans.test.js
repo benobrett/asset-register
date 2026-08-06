@@ -121,9 +121,10 @@ describe('selectOrphans', () => {
   });
 });
 
-// The mirror image, and the one that's actually visible to a user: a
-// signed URL is issued for a path that doesn't exist, so detail.js can't
-// filter it out and it renders as a broken image.
+// The mirror image: a row whose file is gone. Invisible in the app -
+// createSignedUrls returns a per-path error for a missing object and
+// detail.js filters it out, so the asset just reads "No photos yet."
+// Which is exactly why it needs reporting: nobody will notice it.
 describe('selectMissingObjects', () => {
   it('reports a row whose file is not in the bucket', () => {
     const missing = selectMissingObjects({
