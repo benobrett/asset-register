@@ -74,14 +74,21 @@ supabase link --project-ref <your-project-ref>
 supabase functions deploy cleanup-orphaned-photos
 ```
 
-Then set the secrets (`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are
-injected automatically; only the cleanup secret needs setting):
+Then set the secret. `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are
+injected automatically; only the cleanup secret needs setting.
+
+Generate it into `.env.cleanup` (gitignored) and set it from there, rather
+than passing it on the command line — an inline value ends up in shell
+history, and you need to keep a copy anyway to configure the cron job and
+to call the function by hand:
 
 ```bash
-supabase secrets set CLEANUP_SECRET="$(openssl rand -hex 32)"
+node -e "console.log('CLEANUP_SECRET=' + require('crypto').randomBytes(32).toString('hex'))" > .env.cleanup
+supabase secrets set --env-file .env.cleanup
 ```
 
 **Never put that value, or the service role key, in this repository.**
+`.env.cleanup` is gitignored for the same reason `.env` is.
 
 ## Scheduling
 

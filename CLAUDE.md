@@ -283,6 +283,10 @@ Thumbnails are a **fixed-size** grid with `object-fit: cover`, so a portrait and
 
 `.env.e2e` (gitignored) is the same two keys plus `E2E_TEST_EMAIL`/`E2E_TEST_PASSWORD` and `E2E_INCOMPLETE_PROFILE_EMAIL`/`E2E_INCOMPLETE_PROFILE_PASSWORD`, pointed at a **separate** Supabase project — see "Testing conventions" for why this can't just reuse `.env`. `.env.e2e.example` documents it the same way.
 
+`.env.cleanup` (gitignored) holds only `CLEANUP_SECRET`, and is **not** an app env var — nothing in `src/` reads it and no build touches it. It exists so the value can be handed to `supabase secrets set --env-file .env.cleanup` without ever being typed into a shell history or a chat window; the function reads it from its own Supabase environment at runtime. See "Storage cleanup". `.env.cleanup.example` documents the name.
+
+`supabase/.temp/` (gitignored) is written by `supabase link` and holds a local CLI session. `supabase/config.toml` beside it **is** committed — that's project configuration, not a credential.
+
 ## Testing conventions
 **Vitest** (`tests/`) covers pure logic — validation, formatting, the offline queue. **Playwright** (`e2e/`) covers user-facing flows end to end in a real (Chromium) browser. Any PR that adds or changes a user-facing flow includes or updates an e2e spec; a bug fix to an existing flow should add the spec that would have caught the bug. Pure-logic changes need Vitest only.
 
