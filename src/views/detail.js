@@ -252,19 +252,28 @@ export async function renderDetail(container, { navigate, params }) {
       // genuinely came back with no rows - which does mean "no photos".
       if (savedResult) {
         const saved = savedResult.data ?? [];
-        const signedUrls = await withPhotoQueryTimeout(
+        const { urls, unavailable } = await withPhotoQueryTimeout(
           getPhotoUrls(saved.map((photo) => photo.storage_path)),
-          new Map()
+          // Offline, the timeout fires and nothing gets signed. That's a
+          // connection problem, not a permission one, so don't accuse the
+          // photos of being unavailable - leave both empty and let the
+          // last known set below stand.
+          { urls: new Map(), unavailable: [] }
         );
+        const unavailablePaths = new Set(unavailable);
+        // A row whose file can't be signed is kept and rendered as a
+        // placeholder, not dropped. Dropping it is indistinguishable from
+        // the asset having no photo, which is precisely what hid #97.
         savedPhotos = saved
           .map((photo) => ({
             id: photo.id,
             position: photo.position,
             storagePath: photo.storage_path,
-            url: signedUrls.get(photo.storage_path) ?? null,
+            url: urls.get(photo.storage_path) ?? null,
+            unavailable: unavailablePaths.has(photo.storage_path),
             pending: false,
           }))
-          .filter((photo) => photo.url);
+          .filter((photo) => photo.url || photo.unavailable);
       }
     } catch {
       // Keep the last known set (below) rather than dropping them.
@@ -291,7 +300,7 @@ export async function renderDetail(container, { navigate, params }) {
       }));
 
     photos = [...savedPhotos, ...pending]
-      .filter((photo) => photo.url)
+      .filter((photo) => photo.url || photo.unavailable)
       // position is a sort key with gaps in it, not an index.
       .sort((a, b) => a.position - b.position)
       .map((photo, index, all) => ({
@@ -554,6 +563,11 @@ export async function renderDetail(container, { navigate, params }) {
   }
 
   function drawView() {
+    // The lightbox only ever gets photos it can actually display, so its
+    // indices are into this list rather than `photos` - an unavailable
+    // tile isn't clickable and must not occupy a slot in the viewer.
+    const viewablePhotos = photos.filter((photo) => !photo.unavailable);
+
     body.innerHTML = `
       <article class="asset-detail">
         <!-- Fields first in the DOM, photos second, so they read in that
@@ -580,17 +594,29 @@ export async function renderDetail(container, { navigate, params }) {
                 ? `<ul class="photo-grid asset-detail-photos">
                     ${photos
                       .map(
-                        (photo, index) => `
+                        (photo) => `
                       <li class="photo-grid-item">
-                        <button
+                        ${
+                          photo.unavailable
+                            ? // Deliberately occupies the tile rather than
+                              // disappearing: a photo the register still
+                              // has a row for is not the same as no photo,
+                              // and only one of those is worth reporting.
+                              `<div class="photo-thumb photo-thumb-unavailable" role="img"
+                                    aria-label="Photo unavailable">
+                                 <span aria-hidden="true">⚠</span>
+                                 <span class="photo-unavailable-text">Photo unavailable</span>
+                               </div>`
+                            : `<button
                           type="button"
                           class="photo-thumb-button"
-                          data-photo-index="${index}"
+                          data-photo-index="${viewablePhotos.indexOf(photo)}"
                           aria-label="View ${escapeHtml(photo.alt)}"
                           ${editingPhotos ? 'disabled' : ''}
                         >
                           <img src="${escapeHtml(photo.url)}" alt="${escapeHtml(photo.alt)}" class="photo-thumb" />
-                        </button>
+                        </button>`
+                        }
                         ${
                           editingPhotos
                             ? `<button
@@ -683,7 +709,7 @@ export async function renderDetail(container, { navigate, params }) {
     for (const button of body.querySelectorAll('.photo-thumb-button')) {
       button.addEventListener('click', () => {
         openLightbox({
-          photos,
+          photos: viewablePhotos,
           startIndex: Number(button.dataset.photoIndex),
           // Focus returns to the thumbnail that opened it. Safe across a
           // re-render: the overlay doesn't trigger one, so this node is
@@ -724,14 +750,31 @@ export async function renderDetail(container, { navigate, params }) {
         // Queued, never written straight to Supabase - adding a photo is
         // the same act as capturing one, and has to work standing in
         // front of the asset with no signal.
+        const photoId = crypto.randomUUID();
         await queuePhoto({
-          id: crypto.randomUUID(),
+          id: photoId,
           assetId: asset.id,
           storagePath: buildPhotoPath(session.user.id),
           position: nextPosition,
           blob,
         });
-        if (navigator.onLine) await syncAll();
+
+        if (navigator.onLine) {
+          // syncAll's failures used to be discarded here, and that is what
+          // made issue #97 invisible: with no Storage policy every upload
+          // 403'd, the photo stayed queued, and this screen rendered it
+          // from its local blob - so it looked perfect to the person who
+          // took it and didn't exist for anyone else.
+          //
+          // Failing while *offline* is normal and stays silent; the queue
+          // exists for exactly that. Failing while online is not, and the
+          // queue will retry it forever without ever saying so.
+          const result = await syncAll();
+          if (result.photos.failed.some((failure) => failure.id === photoId)) {
+            photoError =
+              'Saved on this device, but the upload failed, so other people can’t see this photo yet. It will retry — if it keeps happening, report it.';
+          }
+        }
       } catch (err) {
         photoError = err.message || 'Could not add this photo. Try again.';
       }

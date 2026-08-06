@@ -23,23 +23,45 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
 export const PHOTO_BUCKET = 'asset-photos';
 
 // Batched, so an asset with four photos costs one round trip instead of
-// four. Returns a Map of path -> signed URL; a path that couldn't be
-// signed is simply absent rather than throwing, so one bad row can't
-// stop the rest of an asset's photos from displaying.
+// four. One path that can't be signed never stops the rest displaying.
+//
+// Returns { urls, unavailable } rather than just a Map. It used to return
+// only the Map, silently dropping anything that failed - which meant a
+// photo the database still knows about vanished from the screen, looking
+// exactly like an asset that never had one. That is how issue #97 went
+// unnoticed: a Storage permission failure and "no photos yet" were
+// indistinguishable, so nobody could report what they couldn't see. The
+// caller now gets the failures too and can say so.
 export async function getPhotoUrls(photoPaths, expiresInSeconds = 3600) {
   const paths = [...new Set((photoPaths ?? []).filter(Boolean))];
-  if (!paths.length) return new Map();
+  if (!paths.length) return { urls: new Map(), unavailable: [] };
 
   const { data, error } = await supabase.storage
     .from(PHOTO_BUCKET)
     .createSignedUrls(paths, expiresInSeconds);
-  if (error) throw error;
+  // A whole-request failure: nothing could be signed, so every path is
+  // unavailable rather than the screen losing its photos with no
+  // explanation.
+  if (error) {
+    console.error('Could not sign any photo URLs:', error);
+    return { urls: new Map(), unavailable: paths };
+  }
 
-  return new Map(
-    (data ?? [])
-      .filter((entry) => entry.signedUrl && !entry.error)
-      .map((entry) => [entry.path, entry.signedUrl])
-  );
+  const urls = new Map();
+  const unavailable = [];
+  for (const entry of data ?? []) {
+    if (entry.signedUrl && !entry.error) {
+      urls.set(entry.path, entry.signedUrl);
+    } else {
+      // Per-path. Supabase reports a missing object and an object you
+      // aren't allowed to read with the same message, deliberately - so
+      // this can't tell "deleted" from "denied", and the UI shouldn't
+      // claim to either. The console keeps the detail for diagnosis.
+      console.error('Could not sign photo URL:', entry.path, entry.error);
+      unavailable.push(entry.path);
+    }
+  }
+  return { urls, unavailable };
 }
 
 // Bucket isn't public (RLS gates everything else on login), so photos
