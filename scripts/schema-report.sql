@@ -1,0 +1,27 @@
+-- Schema introspection report. Run this in a project's Supabase SQL
+-- editor and save the single JSON cell it returns; `npm run schema:diff`
+-- compares two of them. See CLAUDE.md, "Schema drift".
+--
+-- Covers the things that are invisible in normal use and silently wrong,
+-- rather than everything:
+--
+--   foreign_keys   on-delete rules. Missed cascade = issue #99: deleting
+--                  an asset with repairs failed in production for months.
+--   storage        policies and RLS on storage.objects, plus bucket
+--                  visibility. Zero policies there = issue #97: every
+--                  photo upload 403'd since the beginning.
+--   policies/rls   table RLS. A silent divergence here is a security
+--                  problem, not a bug.
+--   checks         re-enforcements of client-side rules (profiles' name
+--                  constraints, condition's allowed values).
+--   triggers       handle_new_user missing would strand every new signup
+--                  on the name prompt.
+--   columns        types, nullability, defaults.
+--
+-- Deliberately one physical line, and no quote-doubling or dollar
+-- quoting: SQL reaching that editor through a chat window has repeatedly
+-- had both mangled here (CLAUDE.md, "Development environment").
+--
+-- Read-only. Safe to run against production.
+
+select jsonb_pretty(jsonb_build_object('foreign_keys', coalesce((select jsonb_agg(jsonb_build_object('name', c.conname, 'table', c.conrelid::regclass::text, 'references', c.confrelid::regclass::text, 'on_delete', c.confdeltype) order by c.conname) from pg_constraint c where c.contype = 'f' and c.connamespace = 'public'::regnamespace), '[]'::jsonb), 'checks', coalesce((select jsonb_agg(jsonb_build_object('name', c.conname, 'table', c.conrelid::regclass::text, 'definition', pg_get_constraintdef(c.oid)) order by c.conname) from pg_constraint c where c.contype = 'c' and c.connamespace = 'public'::regnamespace), '[]'::jsonb), 'rls', coalesce((select jsonb_agg(jsonb_build_object('table', c.relname, 'enabled', c.relrowsecurity) order by c.relname) from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relkind = 'r'), '[]'::jsonb), 'policies', coalesce((select jsonb_agg(jsonb_build_object('table', p.tablename, 'name', p.policyname, 'command', p.cmd, 'using', p.qual, 'with_check', p.with_check) order by p.tablename, p.policyname) from pg_policies p where p.schemaname = 'public'), '[]'::jsonb), 'triggers', coalesce((select jsonb_agg(jsonb_build_object('name', t.tgname, 'table', t.tgrelid::regclass::text, 'function', p.proname) order by t.tgname) from pg_trigger t join pg_proc p on p.oid = t.tgfoid join pg_class c on c.oid = t.tgrelid join pg_namespace n on n.oid = c.relnamespace where not t.tgisinternal and n.nspname in ('public', 'auth')), '[]'::jsonb), 'columns', coalesce((select jsonb_agg(jsonb_build_object('table', a.table_name, 'column', a.column_name, 'type', a.data_type, 'nullable', a.is_nullable, 'default', a.column_default) order by a.table_name, a.column_name) from information_schema.columns a where a.table_schema = 'public'), '[]'::jsonb), 'storage_rls', (select c.relrowsecurity from pg_class c where c.oid = 'storage.objects'::regclass), 'storage_policies', coalesce((select jsonb_agg(jsonb_build_object('name', p.policyname, 'command', p.cmd, 'using', p.qual, 'with_check', p.with_check) order by p.policyname) from pg_policies p where p.schemaname = 'storage' and p.tablename = 'objects'), '[]'::jsonb), 'buckets', coalesce((select jsonb_agg(jsonb_build_object('name', b.name, 'public', b.public) order by b.name) from storage.buckets b), '[]'::jsonb))) as report;

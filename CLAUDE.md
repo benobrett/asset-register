@@ -77,6 +77,10 @@ Built on Windows, running on a Chromebook (ChromeOS/Chrome) in the field. Being 
 │   └── fixtures/             Files specs hand to setInputFiles() etc.
 ├── migrations/             Incremental SQL actually run against the live Supabase project, in the order it was run
 ├── schema.sql              Full current schema — see "Data model" for how this relates to migrations/
+├── scripts/                Maintenance tooling, run by hand — see "Schema drift"
+│   ├── schema-report.sql     Read-only introspection; run in a project's SQL editor
+│   ├── schema-diff-lib.js    Pure comparison logic, unit tested from tests/
+│   └── schema-diff.mjs       CLI wrapper — npm run schema:diff
 ├── supabase/
 │   └── functions/
 │       └── cleanup-orphaned-photos/  The one thing here that runs outside the browser — see "Storage cleanup"
@@ -191,6 +195,26 @@ Two things follow, and both are the real lesson rather than the specific bug:
 - **Prefer a migration over hand-editing `schema.sql`,** even for something you're "just correcting", so the change has a chance of reaching a database at all.
 
 The delete rules are cheap to check — the query is at the bottom of `migrations/0006_fix_asset_fk_cascades.sql`; `confdeltype` should be `c` on every foreign key into `assets` and `asset_repairs`.
+
+### Schema drift
+`scripts/schema-report.sql` + `npm run schema:diff` exist because that assumption has now been wrong twice, both times in production, both times found by a user rather than by anything here:
+
+- **#99** — `asset_repairs.asset_id` had no `on delete cascade` in production, so deleting an asset with repairs failed. Declared in `schema.sql` since the beginning.
+- **#97** — `storage.objects` had RLS on and **zero policies** in production, so every photo upload had 403'd since the beginning. Also declared in `schema.sql`, with a comment claiming it had been set up in the dashboard. It hadn't.
+
+**It compares the two live databases against each other, not against `schema.sql`.** That's deliberate: both bugs were production differing from e2e, so this comparison would have caught both, whereas parsing `schema.sql` catches only the subset that file describes — and `schema.sql` was *wrong* both times. Two independently-configured databases disagreeing is the signal; which one is right is a judgement call the tool doesn't make.
+
+Run `scripts/schema-report.sql` in each project's SQL editor (read-only, safe against production), save each JSON cell, then:
+
+```
+npm run schema:diff -- production.json e2e.json
+```
+
+Exits non-zero on drift, so it could gate something later. It covers foreign key delete rules, CHECK constraints, RLS flags and policies, triggers, columns, **`storage.objects` policies and RLS, and bucket visibility** — that last group being the #97 blind spot, and the reason a table-only check wouldn't have been enough.
+
+`scripts/schema-diff-lib.js` holds the comparison as a pure function, unit tested in `tests/schema-diff.test.js`; the first two cases reproduce #99 and #97 from the reports the live projects would have produced at the time, so a refactor can't quietly stop it doing the one job it exists for. The `IGNORE` list in `schema-diff.mjs` is empty on purpose — the two projects should be identical, so anything added there needs a comment saying why it isn't a bug.
+
+**This is run by hand, not in CI**, and that's a real limitation rather than an oversight: introspection needs a database connection or the service role, and neither belongs in CI on a public repo. Run it after any migration, and whenever something behaves differently in production than the tests suggest it should.
 
 ### Tables
 - **`assets`** — one row per logged asset: name, description, photo path, recorded date/time, plus `created_by`/`created_at`/`updated_at`. `asset_number` is a sequence-backed `generated always as identity` column, formatted client-side into the user-facing "Item-01" ID (`format.js`) — assigned atomically at insert time and never reused, even after a delete. `condition` (`'good'`/`'ok'`/`'poor'`, check-constrained) and `condition_note` (free text, length-capped at 200 to match `validation.js`'s `CONDITION_NOTE_MAX_LENGTH`) are both nullable and optional at capture — every pre-existing asset has neither, there's no sensible value to backfill, and a required field would be one more thing standing between field staff and a saved record. **Current state only, not a history**: editing overwrites the previous value, the same trade-off `asset_repairs` would face if it were a single flag instead of a log — if condition history ever matters, that's the pattern to follow (an `asset_conditions` table, current value read from the latest row), not a retrofit of this column. Stored lowercase; display casing and the best-to-worst sort rank both live in `format.js` (`formatCondition`, `conditionRank`) as the single source of truth, so a sort can never silently regress to alphabetical order if a fourth value is ever added.
@@ -493,3 +517,4 @@ Flag security and correctness issues loudly; style suggestions quietly — the p
 - `npm run test:e2e` — run the Playwright suite (builds + previews first, per `playwright.config.js`'s `webServer`)
 - `npm run test:e2e:ui` — same, with Playwright's debugging UI
 - `npm run lint` — ESLint
+- `npm run schema:diff -- <a.json> <b.json>` — compare two schema reports from `scripts/schema-report.sql`; see "Schema drift"
