@@ -27,7 +27,10 @@ export default [
     },
   },
   {
-    files: ['vite.config.js', 'eslint.config.js', 'playwright.config.js'],
+    // scripts/*.mjs is the CLI half of the schema drift check and reads
+    // files and argv; the pure schema-diff-lib.js beside it deliberately
+    // touches neither, so it gets no globals (see the block below).
+    files: ['vite.config.js', 'eslint.config.js', 'playwright.config.js', 'scripts/**/*.mjs'],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'module',
@@ -58,7 +61,7 @@ export default [
     // The Deno entry point beside it is .ts and isn't linted here; this
     // project has no TypeScript toolchain, and adding one for a single
     // out-of-band file isn't worth it.
-    files: ['supabase/functions/**/*.js'],
+    files: ['supabase/functions/**/*.js', 'scripts/*-lib.js'],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'module',
