@@ -15,6 +15,9 @@ import {
   queueRepair,
   queueRepairComment,
   removeQueuedPhoto,
+  saveDraft,
+  getDraft,
+  clearDraft,
 } from '../src/db.js';
 
 afterEach(async () => {
@@ -23,8 +26,8 @@ afterEach(async () => {
   // which hangs indefinitely rather than actually closing it.
   // Must track db.js's DB_VERSION: opening at a lower version than the
   // one already open throws VersionError rather than downgrading.
-  const STORES = ['assets', 'repairs', 'repairComments', 'photos'];
-  const request = indexedDB.open('asset-register', 4);
+  const STORES = ['assets', 'repairs', 'repairComments', 'photos', 'drafts'];
+  const request = indexedDB.open('asset-register', 5);
   const rawDb = await new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
@@ -177,5 +180,49 @@ describe('offline photo queue', () => {
 
     expect(await getUnsyncedPhotos()).toHaveLength(0);
     expect(await getUnsyncedAssets()).toHaveLength(1);
+  });
+});
+
+// Drafts are in-progress form state, not a queued mutation - see the
+// comment in db.js. They exist so a capture form survives the page being
+// destroyed underneath it (issue #105, Android returning from the camera).
+describe('drafts', () => {
+  it('round-trips a draft, blobs included', async () => {
+    const blob = new Blob(['photo bytes'], { type: 'image/jpeg' });
+    await saveDraft('capture', { assetName: 'Fence post', photos: [{ localId: 'p1', blob }] });
+
+    const draft = await getDraft('capture');
+    expect(draft.assetName).toBe('Fence post');
+    // The Blob is the reason this is IndexedDB and not localStorage.
+    expect(draft.photos[0].blob).toBeInstanceOf(Blob);
+    expect(await draft.photos[0].blob.text()).toBe('photo bytes');
+  });
+
+  it('returns null when there is no draft', async () => {
+    expect(await getDraft('capture')).toBeNull();
+  });
+
+  it('overwrites rather than accumulating', async () => {
+    await saveDraft('capture', { assetName: 'First' });
+    await saveDraft('capture', { assetName: 'Second' });
+    expect((await getDraft('capture')).assetName).toBe('Second');
+  });
+
+  it('clears', async () => {
+    await saveDraft('capture', { assetName: 'Gone soon' });
+    await clearDraft('capture');
+    expect(await getDraft('capture')).toBeNull();
+  });
+
+  it('clearing a draft that was never saved is not an error', async () => {
+    await expect(clearDraft('capture')).resolves.toBeUndefined();
+  });
+
+  // The whole point is surviving a reload, so it must not be filtered out
+  // by the synced flag the queue stores use.
+  it('is not returned by any of the sync queues', async () => {
+    await saveDraft('capture', { assetName: 'Draft only' });
+    expect(await getUnsyncedAssets()).toEqual([]);
+    expect(await getUnsyncedPhotos()).toEqual([]);
   });
 });

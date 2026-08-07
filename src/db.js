@@ -6,7 +6,7 @@
 import { openDB } from 'idb';
 
 const DB_NAME = 'asset-register';
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 const ASSET_STORE = 'assets';
 const REPAIR_STORE = 'repairs';
 const REPAIR_COMMENT_STORE = 'repairComments';
@@ -14,6 +14,13 @@ const REPAIR_COMMENT_STORE = 'repairComments';
 // asset: they also have to be addable to an asset that synced long ago,
 // which a field nested in the asset record couldn't represent.
 const PHOTO_STORE = 'photos';
+// In-progress form state, which is *not* a queued mutation: nothing here
+// ever syncs. It exists so a capture form survives the page being
+// destroyed underneath it - see CLAUDE.md, "Android capture lifecycle".
+//
+// Not localStorage, which is where a read-through cache like the profile
+// name lives: this holds photo Blobs, and localStorage is strings only.
+const DRAFT_STORE = 'drafts';
 
 let dbPromise;
 
@@ -32,6 +39,9 @@ function getDb() {
         }
         if (oldVersion < 4) {
           db.createObjectStore(PHOTO_STORE, { keyPath: 'id' });
+        }
+        if (oldVersion < 5) {
+          db.createObjectStore(DRAFT_STORE, { keyPath: 'id' });
         }
       },
       // Without this, a stale tab left open from before a DB_VERSION bump
@@ -125,4 +135,32 @@ export async function getUnsyncedRepairComments() {
 export async function markRepairCommentSynced(id) {
   const db = await getDb();
   await db.delete(REPAIR_COMMENT_STORE, id);
+}
+
+// --- Drafts -----------------------------------------------------------
+//
+// Deliberately not the queue<Entity>/getUnsynced<Entity>s/mark<Entity>Synced
+// naming the stores above follow, because a draft is not a queued
+// mutation: it never syncs, it has no server-side counterpart, and it is
+// discarded rather than uploaded. Following that convention here would
+// invite the next person to add drafts to syncAll(), which would try to
+// insert an asset the user never chose to save.
+//
+// One record per form, keyed by a caller-supplied id ('capture'), so
+// re-opening the form finds whatever was in it last.
+
+export async function saveDraft(id, data) {
+  const db = await getDb();
+  await db.put(DRAFT_STORE, { id, data, updatedAt: Date.now() });
+}
+
+export async function getDraft(id) {
+  const db = await getDb();
+  const record = await db.get(DRAFT_STORE, id);
+  return record?.data ?? null;
+}
+
+export async function clearDraft(id) {
+  const db = await getDb();
+  await db.delete(DRAFT_STORE, id);
 }

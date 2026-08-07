@@ -20,3 +20,10 @@ blob-report/
 # session. supabase/config.toml, beside it, IS committed — that's the
 # project's own configuration rather than a local credential.
 supabase/.temp/
+
+# Schema reports from scripts/schema-report.sql. Working files for
+# `npm run schema:diff` - a point-in-time dump of a live database's
+# structure, not something to version. schema.sql is the tracked copy.
+production.json
+e2e.json
+*.schema-report.json

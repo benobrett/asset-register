@@ -49,6 +49,9 @@ let currentSession = null;
 // Set once route()'s own session check has resolved for the first time -
 // see the onAuthChange listener below for why this matters.
 let sessionCheckedOnce = false;
+// Who the last re-render was for. SIGNED_IN doesn't mean "a different
+// person signed in" - see the listener.
+let renderedForUserId = null;
 // Bumped on every entry to route(), so a call that gets parked on an
 // await can tell it has been superseded - see isSuperseded below.
 let routeGeneration = 0;
@@ -81,6 +84,11 @@ async function route() {
     if (isSuperseded()) return;
   }
   sessionCheckedOnce = true;
+  // Seed the identity the listener compares against, so a session
+  // restored at startup is already accounted for. Without this the first
+  // resume-triggered SIGNED_IN would still re-render once, which for
+  // issue #105 is the one render that costs the user their form.
+  renderedForUserId = currentSession?.user?.id ?? null;
 
   if (!currentSession && !PUBLIC_HASHES.has(hash)) {
     window.location.hash = '#/login';
@@ -175,6 +183,24 @@ onAuthChange((session, event) => {
   // transition - skip it rather than doubling up on the render it's
   // about to do anyway.
   if (!sessionCheckedOnce) return;
+
+  // Same account as the last render? Then nothing that matters to routing
+  // has changed, and tearing the current view down would destroy whatever
+  // the user is in the middle of.
+  //
+  // The guard above only covers *startup* noise, because it latches once
+  // and never resets. Supabase re-emits SIGNED_IN long after startup too:
+  // its GoTrueClient registers its own `visibilitychange` handler and
+  // recovers the session whenever the page goes hidden -> visible, which
+  // is exactly what a camera hand-off does. On Android, opening the
+  // device camera backgrounds the page; coming back could therefore
+  // re-render the capture form out from under a half-filled entry,
+  // losing the typed title and the photo together (issue #105).
+  //
+  // A genuine account switch still re-renders, because the id differs.
+  const userId = session?.user?.id ?? null;
+  if (event === 'SIGNED_IN' && userId && userId === renderedForUserId) return;
+  renderedForUserId = userId;
 
   resetProfileCache();
   route();

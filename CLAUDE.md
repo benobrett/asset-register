@@ -52,7 +52,7 @@ Built on Windows, running on a Chromebook (ChromeOS/Chrome) in the field. Being 
 │   ├── main.js              Hash-based routing (no router library) + the auth/profile gates — see "Routing and auth/profile gates"
 │   ├── auth.js              Login/signup/session, plus profile-completeness helpers (getProfile, isProfileComplete, submitProfileName) and the cached/persisted profile name (getCachedProfileName)
 │   ├── camera.js            Storage-path naming + the downscale/re-compress applied to every photo before it's queued
-│   ├── db.js                IndexedDB offline queue
+│   ├── db.js                IndexedDB offline queue, plus the capture form's draft store (see "Android capture lifecycle")
 │   ├── sync.js              Pushes the queue to Supabase on reconnect
 │   ├── supabase.js          Supabase client init + signed photo URLs
 │   ├── validation.js        Pure, unit-tested form-validation logic
@@ -307,6 +307,19 @@ The one real complexity is that **this app routes on `window.location.hash`, and
 
 Not everything goes through this queue: password reset (see "Password reset") needs a live round trip and is deliberately excluded — there's no meaningful way to queue "email a recovery link" for later.
 
+### Android capture lifecycle
+Handing off to the device camera means **the page can be destroyed while it's open**, and three things in the capture path exist only because of that. None of them look necessary from reading the happy path, and all three are easy to delete by accident (issue #105: on Android, returning from the camera wiped the whole form — the typed title as well as the photo).
+
+- **The capture form persists a draft to IndexedDB on every `input`, and restores it on open.** Not on a timer: the page can go at any moment between the camera opening and returning, so there's no interval safe to debounce by. It's IndexedDB rather than `localStorage` — unlike the profile-name cache — because it holds photo Blobs. Object URLs are deliberately *not* persisted; they belong to a document that no longer exists, so the restore path mints fresh ones. The draft is cleared on save (only after everything is queued) and on leaving, since restoring one asset's details onto the next is worse than losing them.
+- **`db.js`'s `drafts` store deliberately breaks the `queue<Entity>`/`getUnsynced<Entity>s`/`mark<Entity>Synced` naming.** A draft is not a queued mutation: it never syncs and has no server-side counterpart. Following that convention would invite someone to add drafts to `syncAll()`, which would insert an asset the user never chose to save.
+- **Every path out of `downscaleImage` returns bytes we own.** A `File` from an input is a *pointer to something on disk*, not the bytes, and Android's camera writes to a temporary location the system may clean up — so a queued record can outlive the file it points at. The success path already produced fresh bytes via canvas → `toBlob`; the fallback paths now copy explicitly rather than returning the `File`.
+
+**`main.js`'s auth listener will not re-render for a `SIGNED_IN` naming the account already rendered.** Supabase's `GoTrueClient` registers its own `visibilitychange` handler and recovers the session on every hidden → visible transition — which is exactly what a camera hand-off is. The existing `sessionCheckedOnce` guard only covers *startup* noise, because it latches once and never resets, so without the identity check a resume could tear down a half-filled form. A genuine account switch still re-renders, because the id differs.
+
+**Root cause of #105 was never confirmed on hardware.** Two candidates: Android discarding and reloading the page (A), or the app re-rendering itself on resume (B). Reading the code rules the `online` listener out — `watchConnectivity` only calls `syncAll()` and never re-renders — leaving the auth listener as the *only* app-level re-render path, which is why it's hardened above. The draft fixes the symptom under either. To settle it, log a module-level counter in `main.js` on load and watch it over `chrome://inspect` with the device on USB: reset means A, survived means B.
+
+**None of this is reproducible in a desktop browser or in Playwright.** `capture-form.spec.js` reloads the page, which reproduces the *shape* of A and nothing of B, and `setInputFiles()` never drives a real camera hand-off. Changes here need testing on a real Android device.
+
 ## Camera capture
 Using `<input type="file" accept="image/*" capture="environment">` rather than a hand-built `getUserMedia()` live preview:
 - Delegates to the Chromebook's native camera app — better focus/exposure than a custom capture, for free.
@@ -336,7 +349,7 @@ Thumbnails are a **fixed-size** grid with `object-fit: cover`, so a portrait and
 **Vitest** (`tests/`) covers pure logic — validation, formatting, the offline queue. **Playwright** (`e2e/`) covers user-facing flows end to end in a real (Chromium) browser. Any PR that adds or changes a user-facing flow includes or updates an e2e spec; a bug fix to an existing flow should add the spec that would have caught the bug. Pure-logic changes need Vitest only.
 
 ### Vitest
-- Unit tests in `tests/` — one file per module under test (`auth.test.js`, `db.test.js`, `format.test.js`, `sync.test.js`, `validation.test.js`). Almost all of these are `src` modules; `orphans.test.js` is the exception, covering the pure half of the Storage cleanup function (see "Storage cleanup") — it lives in `tests/` like everything else rather than beside the function, so one `npm test` still covers everything.
+- Unit tests in `tests/` — one file per module under test (`auth.test.js`, `db.test.js`, `format.test.js`, `sync.test.js`, `validation.test.js`). Almost all of these are `src` modules; `orphans.test.js` and `schema-diff.test.js` are the exceptions, covering the pure halves of the Storage cleanup function and the drift checker — they live in `tests/` like everything else rather than beside their source, so one `npm test` still covers everything. `capture-draft.test.js` covers the two pure functions `capture.js` exports for exactly this reason: the draft restore path only runs when the page has been destroyed mid-capture, so nobody will ever exercise it by hand.
 - Test pure logic: form validation (`validation.js`), the offline queue and its sync (`db.js`/`sync.js`, mocking the Supabase client), the profile-completeness cache and its fail-open behavior (`auth.js`). Don't unit test camera hardware, real network calls, the OAuth redirect, or the password-reset email/redirect round trip — verify those manually, or cover them in Playwright.
 - IndexedDB isn't available outside a browser — `fake-indexeddb` is already in use to test `db.js`/`sync.js` under Vitest.
 - `vite.config.js`'s `test.exclude` keeps Vitest out of `e2e/` — without it, Vitest's default glob also matches Playwright's `*.spec.js` files and fails trying to run them as unit tests.
