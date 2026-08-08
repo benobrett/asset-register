@@ -15,7 +15,7 @@
 // in this directory.
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
-import { selectOrphans, DEFAULT_GRACE_PERIOD_MS } from './orphans.js';
+import { selectOrphans, selectMissingObjects, DEFAULT_GRACE_PERIOD_MS } from './orphans.js';
 
 const PHOTO_BUCKET = 'asset-photos';
 // Supabase Storage's list() caps out at 1000 per call.
@@ -35,17 +35,27 @@ Deno.serve(async (request: Request) => {
     return json({ error: 'Unauthorized' }, 401);
   }
 
-  // dryRun reports what it would delete and deletes nothing. The first run
-  // against a real bucket should always use it - this is the only code in
-  // the project that deletes files it wasn't explicitly pointed at.
   const url = new URL(request.url);
-  const dryRun = url.searchParams.get('dryRun') === 'true';
+  // Deleting is opt-in. This started out the other way round - delete by
+  // default, ?dryRun=true to hold back - and that is a trap, learned the
+  // hard way: a caller asking for ?report=true against a deployment too
+  // old to know that parameter had it silently ignored, and got a live
+  // destructive run instead of the read-only one it asked for. Nothing was
+  // lost, because there happened to be no orphans, but only because of
+  // that. With the default this way round, every version mismatch, typo
+  // and forgotten flag fails safe: the worst outcome is a report nobody
+  // asked for. dryRun= is still accepted so older callers keep working,
+  // but it is now the default rather than something to remember.
+  const apply = url.searchParams.get('apply') === 'true';
   const gracePeriodMs = Number(url.searchParams.get('gracePeriodMs') ?? DEFAULT_GRACE_PERIOD_MS);
   // Opt out of the empty-register guard below, and *only* that guard - the
   // grace period and the undateable-object rule still apply. Needed because
   // an empty register is genuinely normal in the e2e project, where every
   // spec deletes the asset it created.
   const allowEmptyRegister = url.searchParams.get('allowEmptyRegister') === 'true';
+  // Read-only diagnostic covering *both* directions of drift, not just the
+  // one this function cleans up. Deletes nothing and takes no guards.
+  const report = url.searchParams.get('report') === 'true';
 
   const supabase = createClient(
     Deno.env.get('SUPABASE_URL')!,
@@ -60,6 +70,27 @@ Deno.serve(async (request: Request) => {
       listAllObjects(supabase),
       listReferencedPaths(supabase),
     ]);
+
+    // Before the guards, deliberately: this reads and reports, it never
+    // deletes, so refusing to answer would only hide the state a human is
+    // asking about - including the state that made them ask.
+    if (report) {
+      const orphaned = selectOrphans({ objects, referencedPaths, now: Date.now(), gracePeriodMs });
+      const missing = selectMissingObjects({ objects, referencedPaths });
+      return json({
+        report: true,
+        objects: objects.length,
+        referenced: referencedPaths.length,
+        // Files with nothing pointing at them: what a real run deletes.
+        filesWithNoRow: { count: orphaned.length, paths: orphaned },
+        // Rows pointing at nothing: the mirror image, which this function
+        // does *not* fix. Invisible in the app - a missing object gets a
+        // per-path error from createSignedUrls, which detail.js filters
+        // out, so the asset just reads "No photos yet." That silence is
+        // the reason to report it: nobody is going to notice and tell you.
+        rowsWithNoFile: { count: missing.length, paths: missing },
+      });
+    }
 
     // "Nothing is referenced" and "everything here is rubbish" look
     // identical from here, and only one of them is ever true in practice.
@@ -93,13 +124,14 @@ Deno.serve(async (request: Request) => {
       gracePeriodMs,
     });
 
-    if (dryRun) {
+    if (!apply) {
       return json({
         dryRun: true,
         scanned: objects.length,
         referenced: referencedPaths.length,
         orphaned: orphans.length,
         paths: orphans,
+        hint: 'Nothing was deleted. Re-run with apply=true to delete these.',
       });
     }
 

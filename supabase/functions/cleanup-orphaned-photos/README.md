@@ -62,15 +62,61 @@ pointed at, so it's built to refuse rather than guess:
   empty. It's opt-in, named for what it asserts rather than `force`, and
   turns off *only* this check — the grace period and the undateable-object
   rule still apply.
-- **`?dryRun=true`** reports what it would delete and deletes nothing. Use
-  it for the first run against any project.
+- **Deleting is opt-in: nothing is removed without `?apply=true`.** Every
+  other call — no parameters, a typo, an unrecognised flag — reports what
+  it *would* delete and stops.
+
+  This was originally the other way round, and it bit within an hour of
+  first deployment: a `?report=true` call hit a deployment too old to know
+  that parameter, which ignored it and fell through to a live destructive
+  run. Nothing was lost, but only because there were no orphans that
+  moment. With the default this way round, a version mismatch fails safe.
+
+  **The scheduled job must pass `apply=true`** or it will report forever
+  and clean nothing.
 - **A dedicated `CLEANUP_SECRET`**, not the service role key, authorises a
   call — so whatever schedules this doesn't hold a credential that can do
   anything at all to the database, and rotating one doesn't touch the other.
 
-`orphans.js` holds the decision logic as a pure function with no Deno,
-Supabase or network in it, unit tested in `tests/orphans.test.js`. `index.ts`
-does the listing, querying and deleting around it.
+`orphans.js` holds the decision logic as pure functions with no Deno,
+Supabase or network in them, unit tested in `tests/orphans.test.js`.
+`index.ts` does the listing, querying and deleting around them.
+
+## Drift goes both ways — `?report=true`
+
+This function only ever deletes **files with no row**. The mirror image —
+a **row with no file** — it leaves alone, and **neither direction is
+visible in the app**. `createSignedUrls` returns a per-path `error` and a
+null URL for a missing object, which `getPhotoUrls` and `detail.js` both
+filter out, so the asset reads "No photos yet." rather than showing a
+broken image.
+
+That silence is the point. A photo that quietly ceases to exist is worse
+than one that visibly breaks, because nobody reports it — so the only way
+to find out is to go and ask.
+
+`?report=true` is a read-only diagnostic covering both directions:
+
+```json
+{
+  "report": true,
+  "objects": 258,
+  "referenced": 1,
+  "filesWithNoRow": { "count": 258, "paths": ["..."] },
+  "rowsWithNoFile": { "count": 1,   "paths": ["..."] }
+}
+```
+
+It deletes nothing and takes no guards — not the empty-register check
+either, since refusing to answer would hide exactly the state someone is
+asking about. `rowsWithNoFile` has no grace period applied, deliberately:
+`sync.js` uploads the object *before* inserting the row, so a healthy
+photo never passes through that state and any instance is worth seeing
+immediately.
+
+Nothing here fixes `rowsWithNoFile` — deciding what to do with one is a
+judgement call (delete the row, or re-upload the photo), not something a
+scheduled job should guess at.
 
 ## Deploying
 
@@ -106,7 +152,10 @@ Supabase Dashboard → **Integrations → Cron** → *Create job*:
 - Schedule: `0 3 * * 0` (weekly, 03:00 Sunday) is plenty — orphans are not
   urgent.
 - Type: **Supabase Edge Function**, `cleanup-orphaned-photos`.
-- Add an HTTP header `x-cleanup-secret` with the value set above.
+- **Path must include `?apply=true`** — without it the job runs forever
+  and deletes nothing. See "Safety" for why that's the default.
+- Add an HTTP header `x-cleanup-secret` with the value set above, *and*
+  `Authorization: Bearer <anon key>` — see below, both are required.
 
 ## Two headers are required, not one
 
@@ -133,17 +182,24 @@ SECRET=$(grep '^CLEANUP_SECRET=' .env.cleanup | cut -d= -f2)
 ANON=<your publishable/anon key>
 URL="https://<project-ref>.supabase.co/functions/v1/cleanup-orphaned-photos"
 
-# See what it would do, without deleting anything.
-curl -s -H "Authorization: Bearer $ANON" -H "x-cleanup-secret: $SECRET" \
-  "$URL?dryRun=true"
-
-# For real.
+# What it would delete. This is the default - no flag needed.
 curl -s -H "Authorization: Bearer $ANON" -H "x-cleanup-secret: $SECRET" "$URL"
+
+# Both directions of drift, including rows whose file is missing.
+curl -s -H "Authorization: Bearer $ANON" -H "x-cleanup-secret: $SECRET" \
+  "$URL?report=true"
+
+# For real. Deleting needs apply=true, and nothing else does it.
+curl -s -H "Authorization: Bearer $ANON" -H "x-cleanup-secret: $SECRET" \
+  "$URL?apply=true"
 ```
 
-Response: `{ scanned, referenced, deleted }`, or the same with
-`dryRun: true` and a `paths` array.
+Response: `{ dryRun: true, scanned, referenced, orphaned, paths, hint }`,
+or `{ scanned, referenced, deleted }` once `apply=true` is passed.
 
-Query parameters: `dryRun`, `allowEmptyRegister` (see "Safety"), and
-`gracePeriodMs` — the last is useful in the e2e project, where a test's
-leftovers are minutes old rather than days.
+| Parameter | Default | Effect |
+| --- | --- | --- |
+| `apply` | `false` | The only thing that deletes. See "Safety". |
+| `report` | `false` | Read-only, both directions. See "Drift goes both ways". |
+| `allowEmptyRegister` | `false` | Asserts an empty register is genuine. See "Safety". |
+| `gracePeriodMs` | 24h | Useful in e2e, where leftovers are minutes old rather than days. |
