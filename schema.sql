@@ -264,15 +264,27 @@ create index profiles_missing_name_idx on profiles (id) where first_name is null
 -- This block used to claim the policy "already existed on the production
 -- project, set up directly in the dashboard". It did not. Production had
 -- RLS enabled on storage.objects with zero policies, so every photo
--- upload had been failing with a 403 since the beginning and the bucket
--- was empty - issue #97, fixed by migration 0007. Only the e2e project
--- ever had this, from migrations/e2e-storage-policy.sql, which is why
--- the Playwright suite could assert photos reach Storage and pass.
+-- upload had been failing since the beginning - issue #97, migration
+-- 0007. And the bucket was not empty but absent: production had no
+-- buckets at all, found on 2026-08-08 when 0007's policy alone changed
+-- nothing and photos still didn't arrive. 0007 creates the policy, 0008
+-- the bucket underneath it, and a policy naming a bucket_id that no
+-- bucket has is accepted without complaint. Only the e2e project ever had
+-- either, the bucket by hand and the policy from
+-- migrations/e2e-storage-policy.sql, which is why the Playwright suite
+-- could assert photos reach Storage and pass throughout.
 --
 -- `for all` is deliberate: an owner-scoped delete would break photo
 -- removal for anyone who didn't upload the file - the same bug in a
 -- different action. The bucket must stay private; a public bucket would
 -- "fix" access by removing it.
+-- The bucket itself, missing from this file until 2026-08-08 - everything
+-- above described access rules for something only e2e had. Declared
+-- before the policy, since the policy is accepted either way.
+insert into storage.buckets (id, name, public)
+  values ('asset-photos', 'asset-photos', false)
+  on conflict (id) do nothing;
+
 create policy "Logged-in users can manage asset photos"
   on storage.objects for all
   using (bucket_id = 'asset-photos' and auth.uid() is not null)
