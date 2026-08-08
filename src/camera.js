@@ -22,9 +22,17 @@ export async function downscaleImage(file, { maxEdge = MAX_EDGE_PX, quality = JP
     // pixels, and drawing to a canvas otherwise discards it.
     bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
   } catch {
-    // Unreadable, or a format this browser can't decode - queue what we
+    // Unreadable, or a format this browser can't decode - keep what we
     // were handed rather than losing the capture over a resize.
-    return file;
+    //
+    // Copied into memory rather than returned as-is, though. A File from
+    // an input is a *pointer* to something on disk, not the bytes: on
+    // Android the camera writes to a temporary location the system is
+    // free to clean up, so a queued record can outlive the file it points
+    // at and sync a photo that no longer exists. The success path above
+    // already produces fresh bytes (canvas -> toBlob); this makes the
+    // fallback do the same. See CLAUDE.md, "Android capture lifecycle".
+    return copyToBlob(file);
   }
 
   try {
@@ -41,11 +49,25 @@ export async function downscaleImage(file, { maxEdge = MAX_EDGE_PX, quality = JP
     // Re-encoded even when it was already under the size limit: the
     // source is typically a high-quality JPEG, so the recompression is
     // worth more than the resize on its own.
-    return blob ?? file;
+    return blob ?? (await copyToBlob(file));
   } catch {
-    return file;
+    return copyToBlob(file);
   } finally {
     bitmap.close();
+  }
+}
+
+// Detach a File from the disk it points at. Every path out of
+// downscaleImage returns bytes we own, so nothing downstream is holding a
+// reference the OS can invalidate underneath it.
+async function copyToBlob(file) {
+  try {
+    return new Blob([await file.arrayBuffer()], { type: file.type || 'image/jpeg' });
+  } catch {
+    // Reading it failed too - the file is likely already gone. Hand back
+    // the original so the caller's own error handling sees something
+    // rather than undefined.
+    return file;
   }
 }
 

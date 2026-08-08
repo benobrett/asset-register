@@ -6,10 +6,52 @@ import {
   MAX_ASSET_PHOTOS,
 } from '../validation.js';
 import { downscaleImage, buildPhotoPath } from '../camera.js';
-import { queueAsset, queuePhoto, queueRepair } from '../db.js';
+import {
+  queueAsset,
+  queuePhoto,
+  queueRepair,
+  saveDraft as persistDraft,
+  getDraft,
+  clearDraft,
+} from '../db.js';
 import { syncAll } from '../sync.js';
 import { CONDITION_VALUES, formatCondition } from '../format.js';
 import { confirmDialog } from '../confirmDialog.js';
+
+// One draft, for this one form. See "Android capture lifecycle" in
+// CLAUDE.md for why in-progress state is written to storage at all.
+const DRAFT_ID = 'capture';
+
+// Text fields worth restoring. Deliberately a list rather than "every
+// input in the form": repair sub-forms come and go, and a stale value
+// restored into one of those would be worse than losing it.
+const DRAFT_FIELDS = ['assetName', 'description', 'recordedAt', 'condition', 'conditionNote'];
+
+/**
+ * Reduce a form to the values worth persisting. Pure and exported so the
+ * round-trip is testable without a browser - the restore path is the one
+ * that has to survive the page being destroyed, and it's the one nobody
+ * will exercise by hand.
+ */
+export function readDraftFields(formValues) {
+  const draft = {};
+  for (const field of DRAFT_FIELDS) {
+    const value = formValues?.[field];
+    if (typeof value === 'string' && value !== '') draft[field] = value;
+  }
+  return draft;
+}
+
+/**
+ * Is there anything here worth restoring? An untouched form auto-fills
+ * recordedAt, so "has any key" would treat simply opening the screen as a
+ * draft and offer to restore nothing.
+ */
+export function draftHasContent(draft) {
+  if (!draft) return false;
+  const meaningful = DRAFT_FIELDS.filter((field) => field !== 'recordedAt');
+  return meaningful.some((field) => draft[field]) || (draft.photos?.length ?? 0) > 0;
+}
 
 function nowForDateTimeLocal() {
   const now = new Date();
@@ -59,6 +101,7 @@ export function renderCapture(container, { navigate }) {
         <ul class="photo-grid" id="photo-grid" aria-labelledby="photos-label"></ul>
         <button type="button" id="add-photo-button">Add photo</button>
         <p class="asset-meta" id="photo-limit-note" hidden></p>
+        <p class="field-error" id="photo-error" role="alert" hidden></p>
 
         <label>
           Date/time
@@ -110,14 +153,25 @@ export function renderCapture(container, { navigate }) {
     </section>
   `;
 
-  container.querySelector('#back').addEventListener('click', () => navigate('#/register'));
+  // Leaving deliberately discards the draft. Restoring it later would be
+  // worse than losing it: the next new-asset capture would silently start
+  // pre-filled with a previous asset's details, which is how you get the
+  // wrong description attached to the right photo.
+  const leave = async () => {
+    try {
+      await clearDraft(DRAFT_ID);
+    } catch (err) {
+      console.error('Could not clear the capture draft:', err);
+    }
+    navigate('#/register');
+  };
+
+  container.querySelector('#back').addEventListener('click', leave);
   // Same destination as the header's back button - two ways out of the
   // form, one at the top and one beside the action you'd otherwise take.
   // Neither warns about unsaved input, deliberately consistent with each
   // other rather than one of them being stricter.
-  container
-    .querySelector('#cancel-capture')
-    .addEventListener('click', () => navigate('#/register'));
+  container.querySelector('#cancel-capture').addEventListener('click', leave);
 
   const form = container.querySelector('#capture-form');
 
@@ -128,6 +182,33 @@ export function renderCapture(container, { navigate }) {
   const photoGrid = container.querySelector('#photo-grid');
   const addPhotoButton = container.querySelector('#add-photo-button');
   const photoLimitNote = container.querySelector('#photo-limit-note');
+  const photoError = container.querySelector('#photo-error');
+
+  function showPhotoError(message) {
+    photoError.hidden = !message;
+    photoError.textContent = message ?? '';
+  }
+
+  // Written on every change, not on a timer: the page can be destroyed at
+  // any moment between the camera opening and returning, so there is no
+  // safe interval to debounce by. Each write is a handful of strings plus
+  // Blobs already in memory, into IndexedDB, off the main thread.
+  async function saveDraft() {
+    try {
+      await persistDraft(DRAFT_ID, {
+        ...readDraftFields(Object.fromEntries(new FormData(form))),
+        // Blobs survive IndexedDB directly - that's the whole reason this
+        // isn't localStorage. Object URLs are not persisted: they're tied
+        // to this document and are dead after a reload, so the restore
+        // path mints fresh ones.
+        photos: pendingPhotos.map((photo) => ({ localId: photo.localId, blob: photo.blob })),
+      });
+    } catch (err) {
+      // A failed draft write must never block capture - it's a safety
+      // net, not the feature.
+      console.error('Could not save the capture draft:', err);
+    }
+  }
 
   function drawPhotoGrid() {
     photoGrid.innerHTML = pendingPhotos
@@ -158,6 +239,8 @@ export function renderCapture(container, { navigate }) {
         URL.revokeObjectURL(photo.url);
         pendingPhotos.splice(pendingPhotos.indexOf(photo), 1);
         drawPhotoGrid();
+        // Or the removed photo comes back on the next restore.
+        saveDraft();
       });
     }
 
@@ -183,6 +266,7 @@ export function renderCapture(container, { navigate }) {
     if (photoLimitReached(pendingPhotos.length)) return;
 
     addPhotoButton.disabled = true;
+    showPhotoError(null);
     try {
       const blob = await downscaleImage(file);
       pendingPhotos.push({
@@ -191,6 +275,15 @@ export function renderCapture(container, { navigate }) {
         url: URL.createObjectURL(blob),
       });
       drawPhotoGrid();
+      await saveDraft();
+    } catch (err) {
+      // This used to be try/finally with no catch, so a failed capture
+      // rejected into nothing: the user came back from the camera, saw no
+      // photo, and got no reason. On Android that is indistinguishable
+      // from the form having been wiped (issue #105), which made the two
+      // failures impossible to tell apart from a bug report.
+      console.error('Could not attach the photo:', err);
+      showPhotoError('That photo could not be attached. Try taking it again.');
     } finally {
       // drawPhotoGrid owns the disabled state whenever it runs; this
       // only matters on the path where downscaling threw.
@@ -199,6 +292,45 @@ export function renderCapture(container, { navigate }) {
   });
 
   drawPhotoGrid();
+
+  // Any typed change persists the draft. 'input' rather than 'change' so
+  // a half-typed title survives too - the camera can be opened at any
+  // point, and 'change' on a text field only fires on blur.
+  form.addEventListener('input', () => {
+    saveDraft();
+  });
+
+  // Restore whatever was in the form when it was last destroyed. Runs
+  // after the listeners above are wired, so nothing races the first save.
+  //
+  // Restored silently rather than behind a "restore your draft?" prompt:
+  // the case this exists for is the user coming straight back from the
+  // camera expecting their form to still be there. A dialog asking
+  // whether they meant it would be its own small insult.
+  (async () => {
+    let draft;
+    try {
+      draft = await getDraft(DRAFT_ID);
+    } catch (err) {
+      console.error('Could not read the capture draft:', err);
+      return;
+    }
+    if (!draftHasContent(draft)) return;
+
+    for (const [field, value] of Object.entries(draft)) {
+      if (field === 'photos') continue;
+      const input = form.elements[field];
+      if (input) input.value = value;
+    }
+
+    for (const photo of draft.photos ?? []) {
+      if (photoLimitReached(pendingPhotos.length)) break;
+      // Fresh object URL: the persisted one belonged to a document that
+      // no longer exists.
+      pendingPhotos.push({ ...photo, url: URL.createObjectURL(photo.blob) });
+    }
+    drawPhotoGrid();
+  })();
 
   const repairsSection = container.querySelector('#repairs-section');
   let pendingRepairs = [];
@@ -419,6 +551,11 @@ export function renderCapture(container, { navigate }) {
           createdByEmail: repair.createdByEmail,
         });
       }
+
+      // Cleared only once the asset and its photos are safely in the
+      // queue, not before: if anything above threw, the draft is still
+      // the user's only copy of what they typed.
+      await clearDraft(DRAFT_ID);
 
       if (navigator.onLine) {
         await syncAll();
